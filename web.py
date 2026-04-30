@@ -134,8 +134,8 @@ def parse_multipart(body, boundary):
 # ═══════════════════════════════════════════════════════════════
 
 KNOWN_MODELS = {
-    "GPT-SoVITS": {"markers": ["GPT_SoVITS", "api.py", "webui.py"], "name": "GPT-SoVITS", "description": "少样本语音克隆，3秒参考音频复刻声音", "type": "local", "api_port": 9880, "start_command": "conda activate gpt-sovits && python api.py"},
-    "gpt-sovits": {"markers": ["GPT_SoVITS", "api.py", "webui.py"], "name": "GPT-SoVITS", "description": "少样本语音克隆，3秒参考音频复刻声音", "type": "local", "api_port": 9880, "start_command": "conda activate gpt-sovits && python api.py"},
+    "GPT-SoVITS": {"markers": ["GPT_SoVITS", "api.py", "webui.py"], "name": "GPT-SoVITS", "description": "少样本语音克隆，3秒参考音频复刻声音", "type": "local", "api_port": 9880, "api_endpoint": "/", "voice_endpoint": "/", "start_command": "conda activate gpt-sovits && python api.py", "api_format": "gpt-sovits"},
+    "gpt-sovits": {"markers": ["GPT_SoVITS", "api.py", "webui.py"], "name": "GPT-SoVITS", "description": "少样本语音克隆，3秒参考音频复刻声音", "type": "local", "api_port": 9880, "api_endpoint": "/", "voice_endpoint": "/", "start_command": "conda activate gpt-sovits && python api.py", "api_format": "gpt-sovits"},
     "Qwen3-TTS": {"markers": ["qwen_tts", "pyproject.toml"], "name": "Qwen3-TTS", "description": "通义千问语音合成", "type": "local", "api_port": 5000, "start_command": "conda activate qwen3-tts && python -m qwen_tts.webui"},
     "qwen3-tts": {"markers": ["qwen_tts", "pyproject.toml"], "name": "Qwen3-TTS", "description": "通义千问语音合成", "type": "local", "api_port": 5000, "start_command": "conda activate qwen3-tts && python -m qwen_tts.webui"},
     "IndexTTS2": {"markers": ["index_tts", "webui.py"], "name": "IndexTTS2", "description": "高质量语音合成与声音克隆", "type": "local", "api_port": 7865, "start_command": "uv run python webui.py"},
@@ -147,7 +147,9 @@ KNOWN_MODELS = {
 
 def scan_local_models():
     found = []
-    for scan_base in [TOOLKIT_DIR, MODELS_DIR]:
+    # 扫描目录：项目目录、models 目录、用户 Documents 目录
+    scan_dirs = [TOOLKIT_DIR, MODELS_DIR, Path.home() / "Documents" / "AI-TTS-Toolkit"]
+    for scan_base in scan_dirs:
         if not scan_base.exists():
             continue
         for item in scan_base.iterdir():
@@ -157,19 +159,19 @@ def scan_local_models():
                 try:
                     with open(item / "model.json", 'r', encoding='utf-8') as f:
                         pcfg = json.load(f)
-                    found.append({"id": f"plugin-{item.name}", "name": pcfg.get("name", item.name), "description": pcfg.get("description", "自定义模型"), "type": pcfg.get("type", "plugin"), "path": str(item), "api_port": pcfg.get("port"), "api_url": pcfg.get("api_url", ""), "api_endpoint": pcfg.get("api_endpoint", "/api/tts"), "voice_endpoint": pcfg.get("voice_endpoint", "/api/voices"), "start_command": pcfg.get("start_command", ""), "available": False, "source": "plugin"})
+                    found.append({"id": f"plugin-{item.name}", "name": pcfg.get("name", item.name), "description": pcfg.get("description", "自定义模型"), "type": pcfg.get("type", "plugin"), "path": str(item), "api_port": pcfg.get("port"), "api_url": pcfg.get("api_url", ""), "api_endpoint": pcfg.get("api_endpoint", "/api/tts"), "voice_endpoint": pcfg.get("voice_endpoint", "/api/voices"), "start_command": pcfg.get("start_command", ""), "api_format": pcfg.get("api_format", "standard"), "available": False, "source": "plugin"})
                     log(f"插件: {pcfg.get('name', item.name)}")
                     continue
                 except:
                     pass
             mi = KNOWN_MODELS.get(item.name)
             if mi:
-                found.append({"id": f"local-{item.name.lower()}", "name": mi["name"], "description": mi["description"], "type": mi["type"], "path": str(item), "api_port": mi["api_port"], "api_url": "", "api_endpoint": "/api/tts", "voice_endpoint": "/api/voices", "start_command": mi["start_command"], "available": False, "source": "scanned"})
+                found.append({"id": f"local-{item.name.lower()}", "name": mi["name"], "description": mi["description"], "type": mi["type"], "path": str(item), "api_port": mi["api_port"], "api_url": "", "api_endpoint": mi.get("api_endpoint", "/api/tts"), "voice_endpoint": mi.get("voice_endpoint", "/api/voices"), "start_command": mi["start_command"], "api_format": mi.get("api_format", "standard"), "available": False, "source": "scanned"})
                 log(f"模型: {mi['name']} @ {item}")
                 continue
             py_files = list(item.glob("*.py"))
             if any(f.name in ('webui.py', 'api.py', 'server.py') for f in py_files) and item.name.lower() not in ('ai-tts-toolkit', 'ai-tts-studio'):
-                found.append({"id": f"local-{item.name.lower()}", "name": item.name, "description": f"检测到的模型（{len(py_files)}个py文件）", "type": "local", "path": str(item), "api_port": None, "api_url": "", "api_endpoint": "/api/tts", "voice_endpoint": "/api/voices", "start_command": f"cd {item} && python webui.py", "available": False, "source": "auto-detected"})
+                found.append({"id": f"local-{item.name.lower()}", "name": item.name, "description": f"检测到的模型（{len(py_files)}个py文件）", "type": "local", "path": str(item), "api_port": None, "api_url": "", "api_endpoint": "/api/tts", "voice_endpoint": "/api/voices", "start_command": f"cd {item} && python webui.py", "api_format": "standard", "available": False, "source": "auto-detected"})
                 log(f"自动检测: {item.name}")
     return found
 
@@ -308,6 +310,7 @@ class LocalModelEngine(TTSEngine):
         self.api_endpoint = model_info.get("api_endpoint", "/api/tts")
         self.voice_endpoint = model_info.get("voice_endpoint", "/api/voices")
         self.start_command = model_info.get("start_command", "")
+        self.api_format = model_info.get("api_format", "standard")  # "standard" 或 "gpt-sovits"
 
     def _get_base_url(self):
         return self.api_url or (f"http://127.0.0.1:{self.api_port}" if self.api_port else None)
@@ -330,23 +333,49 @@ class LocalModelEngine(TTSEngine):
     def generate(self, text, voice, output_path, rate=0, pitch=0, **kwargs):
         base = self._get_base_url()
         if not base or not self._is_api_running():
-            raise RuntimeError(f"{self.name} API 未运行！\n请先执行:\n  cd {self.model_path}\n  {self.start_command}")
+            raise RuntimeError(f"{self.name} API 未运行！\n请先在 UI 中切换到该引擎，系统会自动启动。")
         import urllib.request
-        # rate: 前端传纯数字（如 20, -10），转为 speed 倍率（1.0 = 正常）
-        try:
-            speed = 1.0 + float(rate) / 100
-        except (ValueError, TypeError):
-            speed = 1.0
-        payload = json.dumps({
-            "text": text.strip(),
-            "voice": voice,
-            "speed": speed,
-            "pitch": float(pitch) if str(pitch).lstrip('-').isdigit() else 0,
-        }).encode('utf-8')
-        req = urllib.request.Request(f"{base}{self.api_endpoint}", data=payload, headers={'Content-Type': 'application/json'})
-        with urllib.request.urlopen(req, timeout=120) as resp:
+
+        if self.api_format == "gpt-sovits":
+            # GPT-SoVITS 专用格式：POST / {"text", "text_language", "speed"}
+            try:
+                speed = 1.0 + float(rate) / 100
+            except (ValueError, TypeError):
+                speed = 1.0
+            payload = json.dumps({
+                "text": text.strip(),
+                "text_language": "zh",
+                "speed": speed,
+            }).encode('utf-8')
+            endpoint = self.api_endpoint or "/"
+            req = urllib.request.Request(f"{base}{endpoint}", data=payload, headers={'Content-Type': 'application/json'})
+            try:
+                with urllib.request.urlopen(req, timeout=120) as resp:
+                    audio_data = resp.read()
+            except urllib.error.HTTPError as e:
+                err_body = e.read().decode('utf-8', errors='replace')
+                raise RuntimeError(f"{self.name} 生成失败 (HTTP {e.code}): {err_body}")
+            if not audio_data or len(audio_data) < 100:
+                raise RuntimeError(f"{self.name} 生成了无效音频（{len(audio_data)} bytes）")
             with open(output_path, 'wb') as f:
-                f.write(resp.read())
+                f.write(audio_data)
+        else:
+            # 标准格式：POST /api/tts {"text", "voice", "speed", "pitch"}
+            try:
+                speed = 1.0 + float(rate) / 100
+            except (ValueError, TypeError):
+                speed = 1.0
+            payload = json.dumps({
+                "text": text.strip(),
+                "voice": voice,
+                "speed": speed,
+                "pitch": float(pitch) if str(pitch).lstrip('-').isdigit() else 0,
+            }).encode('utf-8')
+            req = urllib.request.Request(f"{base}{self.api_endpoint}", data=payload, headers={'Content-Type': 'application/json'})
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                with open(output_path, 'wb') as f:
+                    f.write(resp.read())
+
         if os.path.exists(output_path) and os.path.getsize(output_path) == 0:
             os.unlink(output_path)
             raise RuntimeError(f"{self.name} 生成了空文件")
@@ -395,9 +424,16 @@ class ModelProcessManager:
         return self._log_dir / f"{engine_id}.log"
 
     def _build_shell_cmd(self, engine):
-        """构建启动命令，处理 conda 环境"""
+        """构建启动命令，处理 conda 环境和模型特殊参数"""
         model_path = engine.model_path
         start_cmd = engine.start_command
+
+        # GPT-SoVITS 需要参考音频参数，自动查找
+        if engine.api_format == "gpt-sovits" and "-dr" not in start_cmd:
+            refer_wav, refer_text = self._find_gpt_sovits_refer(model_path)
+            if refer_wav:
+                start_cmd = f'{start_cmd} -dr "{refer_wav}" -dt "{refer_text}" -dl zh'
+                log(f"GPT-SoVITS 自动添加参考音频: {refer_wav}")
 
         # 查找 conda 的初始化脚本
         conda_init = ""
@@ -419,6 +455,36 @@ class ModelProcessManager:
             shell_cmd = start_cmd
 
         return f'cd "{model_path}" && {shell_cmd}'
+
+    def _find_gpt_sovits_refer(self, model_path):
+        """在 GPT-SoVITS 目录中自动查找参考音频"""
+        mp = Path(model_path)
+        # 常见参考音频位置
+        search_dirs = [
+            mp / "SoVITS_weights",
+            mp / "GPT_weights",
+            mp / "raw",
+            mp / "output",
+            mp,
+        ]
+        audio_exts = {'.wav', '.mp3', '.flac', '.ogg', '.m4a'}
+        for d in search_dirs:
+            if not d.exists():
+                continue
+            for f in sorted(d.iterdir()):
+                if f.suffix.lower() in audio_exts and f.stat().st_size > 1000:
+                    # 尝试找同名的 .txt 标注文件
+                    txt_file = f.with_suffix('.txt')
+                    if txt_file.exists():
+                        try:
+                            text = txt_file.read_text('utf-8').strip()[:100]
+                            if text:
+                                return str(f), text
+                        except:
+                            pass
+                    # 没有标注文件，使用默认文本
+                    return str(f), "请使用此音频作为参考。"
+        return None, None
 
     def start_engine(self, engine_id, engine):
         """启动引擎（非阻塞，立即返回，后台启动）"""
