@@ -84,8 +84,12 @@ def save_config(cfg):
         json.dump(cfg, f, ensure_ascii=False, indent=2)
 
 config = load_config()
-OUTPUT_DIR = Path(config["output_dir"])
+# 强制使用项目内 output/ 目录（忽略配置文件中的旧路径）
+OUTPUT_DIR = TOOLKIT_DIR / "output"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+# 同步更新配置文件
+config["output_dir"] = str(OUTPUT_DIR)
+save_config(config)
 
 def log(msg):
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -951,7 +955,7 @@ select{cursor:pointer}
 <div class="container">
 <div class="header">
     <h1>🎙️ AI-TTS Studio</h1>
-    <p>打字即出语音 · 声音克隆 · 语音识别 · 自动扫描模型 · v3.2</p>
+    <p>打字即出语音 · 声音克隆 · 语音识别 · 自动扫描模型 · v3.3</p>
 </div>
 <div class="tabs">
     <button class="tab active" onclick="switchTab('tts')">🎙️ 语音合成</button>
@@ -1764,7 +1768,7 @@ def main():
     port = config.get("port", 7860)
     print(f"""
 ╔══════════════════════════════════════════════════════════════╗
-║     🎙️  AI-TTS Studio  全球TTS一体化工作台  v3.2  🎙️      ║
+║     🎙️  AI-TTS Studio  全球TTS一体化工作台  v3.3  🎙️      ║
 ╚══════════════════════════════════════════════════════════════╝
 
   📍 http://localhost:{port}
