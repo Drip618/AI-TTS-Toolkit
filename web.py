@@ -551,6 +551,10 @@ class ModelProcessManager:
             if self._current_running and self._current_running != engine_id:
                 self._stop_engine_unlocked(self._current_running)
 
+            # 自动清理端口占用（防止上次进程没杀干净）
+            if engine.api_port:
+                self._kill_port_users(engine.api_port)
+
             # 标记为启动中
             self._status[engine_id] = {"state": "starting", "message": f"正在启动 {engine.name}..."}
 
@@ -639,6 +643,24 @@ class ModelProcessManager:
                 pass
         del self.processes[engine_id]
         self._status[engine_id] = {"state": "stopped", "message": "已停止"}
+
+    def _kill_port_users(self, port):
+        """自动杀掉占用指定端口的进程"""
+        try:
+            import subprocess as sp
+            result = sp.run(['lsof', '-ti', f':{port}'], capture_output=True, text=True, timeout=5)
+            pids = result.stdout.strip().split('\n')
+            pids = [p for p in pids if p.strip()]
+            if pids:
+                for pid in pids:
+                    try:
+                        os.kill(int(pid), signal.SIGKILL)
+                        log(f"自动清理端口 {port} 上的进程 PID={pid}")
+                    except:
+                        pass
+                time.sleep(1)  # 等待端口释放
+        except:
+            pass
         log(f"已停止引擎: {engine_id}")
         return {"success": True, "message": "已停止"}
 
