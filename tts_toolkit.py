@@ -509,25 +509,124 @@ def run_cmd(cmd, cwd=None, check=True):
     return result
 
 def check_prerequisites(platform_info):
-    """检查前置条件"""
+    """检查前置条件，缺失的自动安装"""
     print(f"\n{C.BLU}📋 系统检测{C.R}")
     print(f"  系统: {C.WHT}{platform_info['label']}{C.R}")
     print(f"  架构: {C.WHT}{platform_info['machine']}{C.R}")
     print(f"  GPU:  {C.GRN}NVIDIA ✓{C.R}" if platform_info['has_nvidia'] else f"  GPU:  {C.YEL}无独立GPU（部分工具仅CPU模式）{C.R}")
 
-    # 检查conda
+    # 检查各项
     conda_ok = shutil.which('conda') is not None
-    print(f"  Conda: {C.GRN}✓{C.R}" if conda_ok else f"  Conda: {C.RED}✗ 需要安装{C.R}")
-
-    # 检查pip
     pip_ok = shutil.which('pip') is not None or shutil.which('pip3') is not None
-    print(f"  Pip:   {C.GRN}✓{C.R}" if pip_ok else f"  Pip:   {C.RED}✗{C.R}")
-
-    # 检查git
     git_ok = shutil.which('git') is not None
-    print(f"  Git:   {C.GRN}✓{C.R}" if git_ok else f"  Git:   {C.RED}✗ 需要安装{C.R}")
+    brew_ok = shutil.which('brew') is not None
 
-    return conda_ok and pip_ok and git_ok
+    print(f"  Brew:  {C.GRN}✓{C.R}" if brew_ok else f"  Brew:  {C.RED}✗{C.R}")
+    print(f"  Conda: {C.GRN}✓{C.R}" if conda_ok else f"  Conda: {C.RED}✗{C.R}")
+    print(f"  Pip:   {C.GRN}✓{C.R}" if pip_ok else f"  Pip:   {C.RED}✗{C.R}")
+    print(f"  Git:   {C.GRN}✓{C.R}" if git_ok else f"  Git:   {C.RED}✗{C.R}")
+
+    all_ok = conda_ok and pip_ok and git_ok
+    if all_ok:
+        return True
+
+    # ─── 自动安装缺失环境 ───
+    missing = []
+    if not brew_ok and platform_info['is_mac']:
+        missing.append('Homebrew')
+    if not git_ok:
+        missing.append('Git')
+    if not conda_ok:
+        missing.append('Miniconda')
+    if not pip_ok:
+        missing.append('Pip')
+
+    print(f"\n{C.YEL}⚠️  检测到缺少: {', '.join(missing)}{C.R}")
+    print(f"  {C.WHT}是否自动安装这些环境？(需要网络连接){C.R}")
+
+    try:
+        choice = input(f"  {C.B}▶ 自动安装？(y/n): {C.R}").strip().lower()
+        if choice != 'y':
+            print(f"\n{C.RED}❌ 缺少必要工具，请手动安装后再运行。{C.R}")
+            print(f"  {C.D}Homebrew:  /bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"{C.R}")
+            print(f"  {C.D}Git:       brew install git{C.R}")
+            print(f"  {C.D}Miniconda: brew install --cask miniconda{C.R}")
+            print(f"  {C.D}Pip:       python3 -m ensurepip --upgrade{C.R}")
+            return False
+    except KeyboardInterrupt:
+        print(f"\n  {C.YEL}已取消。{C.R}")
+        return False
+
+    # ─── 执行安装 ───
+    print(f"\n{C.GRN}{C.B}  🔧 开始安装环境...{C.R}\n")
+
+    # 1. Homebrew (macOS)
+    if not brew_ok and platform_info['is_mac']:
+        print(f"  {C.BLU}[1] 安装 Homebrew...{C.R}")
+        run_cmd('/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"', check=False)
+        # 添加到 PATH
+        if platform_info['is_arm']:
+            run_cmd('eval "$(/opt/homebrew/bin/brew shellenv)" && brew --version', check=False)
+        else:
+            run_cmd('eval "$(/usr/local/bin/brew shellenv)" && brew --version', check=False)
+        brew_ok = shutil.which('brew') is not None
+        print(f"  Homebrew: {C.GRN}✓ 安装成功{C.R}" if brew_ok else f"  Homebrew: {C.RED}✗ 安装失败{C.R}")
+
+    # 禁止 Homebrew 自动更新（加速后续安装）
+    os.environ['HOMEBREW_NO_AUTO_UPDATE'] = '1'
+
+    # 2. Git
+    if not git_ok:
+        print(f"  {C.BLU}[2] 安装 Git...{C.R}")
+        if platform_info['is_mac'] and brew_ok:
+            run_cmd('brew install git')
+        elif platform_info['is_linux']:
+            run_cmd('sudo apt install git -y', check=False)
+        git_ok = shutil.which('git') is not None
+        print(f"  Git: {C.GRN}✓ 安装成功{C.R}" if git_ok else f"  Git: {C.RED}✗ 安装失败{C.R}")
+
+    # 3. Miniconda
+    if not conda_ok:
+        print(f"  {C.BLU}[3] 安装 Miniconda...{C.R}")
+        if platform_info['is_mac'] and brew_ok:
+            run_cmd('brew install --cask miniconda')
+        elif platform_info['is_linux']:
+            # Linux: 下载安装脚本
+            run_cmd('curl -fsSL https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -o /tmp/miniconda.sh && bash /tmp/miniconda.sh -b -p $HOME/miniconda3', check=False)
+        elif platform_info['is_windows']:
+            run_cmd('conda install miniconda -y', check=False)
+        # 初始化 conda
+        if shutil.which('conda'):
+            if platform_info['is_mac']:
+                run_cmd('eval "$($(brew --prefix)/Caskroom/miniconda/base/bin/conda shell.bash hook)" && conda init zsh', check=False)
+            else:
+                run_cmd('eval "$(conda shell.bash hook)" && conda init', check=False)
+        conda_ok = shutil.which('conda') is not None
+        print(f"  Conda: {C.GRN}✓ 安装成功{C.R}" if conda_ok else f"  Conda: {C.RED}✗ 安装失败{C.R}")
+
+    # 4. Pip
+    if not pip_ok:
+        print(f"  {C.BLU}[4] 安装 Pip...{C.R}")
+        run_cmd('python3 -m ensurepip --upgrade 2>/dev/null || python3 -m pip install --upgrade pip', check=False)
+        pip_ok = shutil.which('pip') is not None or shutil.which('pip3') is not None
+        print(f"  Pip: {C.GRN}✓ 安装成功{C.R}" if pip_ok else f"  Pip: {C.RED}✗ 安装失败{C.R}")
+
+    # 最终检查
+    print(f"\n{C.BLU}{'═' * 50}{C.R}")
+    print(f"{C.BLU}  📊 环境安装总结{C.R}")
+    print(f"{C.BLU}{'═' * 50}{C.R}")
+    print(f"  Brew:  {C.GRN}✓{C.R}" if shutil.which('brew') else f"  Brew:  {C.RED}✗{C.R}")
+    print(f"  Git:   {C.GRN}✓{C.R}" if shutil.which('git') else f"  Git:   {C.RED}✗{C.R}")
+    print(f"  Conda: {C.GRN}✓{C.R}" if shutil.which('conda') else f"  Conda: {C.RED}✗{C.R}")
+    print(f"  Pip:   {C.GRN}✓{C.R}" if (shutil.which('pip') or shutil.which('pip3')) else f"  Pip:   {C.RED}✗{C.R}")
+    print()
+
+    final_ok = shutil.which('conda') and (shutil.which('pip') or shutil.which('pip3')) and shutil.which('git')
+    if not final_ok:
+        print(f"  {C.YEL}⚠️  部分环境安装失败，但不影响 Edge-TTS 等简单工具的使用。{C.R}")
+        print(f"  {C.YEL}   如需安装全部工具，请手动安装缺失项后重新运行。{C.R}")
+        # 不返回 False，让用户继续选择工具（Edge-TTS 不需要 conda）
+    return True
 
 def install_tool(tool, base_dir, platform_info):
     """安装单个TTS工具"""
@@ -730,12 +829,8 @@ def main():
     # ─── 交互式安装流程 ───
     print(f"  {C.WHT}检测到系统: {platform_info['label']}{C.R}\n")
 
-    # 检查前置条件
+    # 检查前置条件（缺失的会自动安装）
     if not check_prerequisites(platform_info):
-        print(f"\n{C.RED}❌ 缺少必要工具，请先安装:{C.R}")
-        print(f"  {C.YEL}Homebrew (macOS):{C.R}  /bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"")
-        print(f"  {C.YEL}Miniconda:{C.R}         brew install --cask miniconda  或  conda install miniconda")
-        print(f"  {C.YEL}Git:{C.R}               brew install git")
         return
 
     # 显示工具列表
