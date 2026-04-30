@@ -647,6 +647,7 @@ class ModelProcessManager:
                 pass
         del self.processes[engine_id]
         self._status[engine_id] = {"state": "stopped", "message": "已停止"}
+        return {"success": True, "message": "已停止"}
 
     def _kill_port_users(self, port):
         """自动杀掉占用指定端口的进程"""
@@ -665,8 +666,6 @@ class ModelProcessManager:
                 time.sleep(1)  # 等待端口释放
         except:
             pass
-        log(f"已停止引擎: {engine_id}")
-        return {"success": True, "message": "已停止"}
 
     def get_status(self):
         """获取所有引擎状态"""
