@@ -89,9 +89,14 @@ fi
 # ═══════════════════════════════════════════════════════════════
 #  6. 创建输出目录
 # ═══════════════════════════════════════════════════════════════
-echo -e "${CYAN}[6/6] 创建输出目录...${NC}"
-mkdir -p ~/Downloads/最终输出/音频文件
-echo -e "${GREEN}  ✅ 输出目录: ~/Downloads/最终输出/音频文件${NC}"
+echo -e "${CYAN}[6/6] 创建目录结构...${NC}"
+mkdir -p "$SCRIPT_DIR/models"
+mkdir -p "$SCRIPT_DIR/output"
+mkdir -p "$SCRIPT_DIR/.temp"
+mkdir -p "$SCRIPT_DIR/.logs"
+echo -e "${GREEN}  ✅ 目录结构创建完成${NC}"
+echo -e "${GREEN}     models/  → TTS 模型存放${NC}"
+echo -e "${GREEN}     output/  → 生成的音频输出${NC}"
 
 # ═══════════════════════════════════════════════════════════════
 #  完成

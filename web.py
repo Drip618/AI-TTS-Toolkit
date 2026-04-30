@@ -36,7 +36,7 @@ TOOLKIT_DIR = Path(__file__).parent
 CONFIG_DIR = TOOLKIT_DIR / ".config"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 MODELS_DIR = TOOLKIT_DIR / "models"
-OUTPUT_DIR = Path.home() / "Downloads" / "最终输出" / "音频文件"
+OUTPUT_DIR = TOOLKIT_DIR / "output"  # 所有输出统一在项目内
 UPLOAD_DIR = TOOLKIT_DIR / ".uploads"
 TEMP_DIR = TOOLKIT_DIR / ".temp"
 LOG_FILE = TOOLKIT_DIR / ".logs" / "server.log"
@@ -147,8 +147,8 @@ KNOWN_MODELS = {
 
 def scan_local_models():
     found = []
-    # 扫描目录：项目目录、models 目录、用户 Documents 目录
-    scan_dirs = [TOOLKIT_DIR, MODELS_DIR, Path.home() / "Documents" / "AI-TTS-Toolkit"]
+    # 扫描目录：只扫描 models/ 子目录（统一管理）
+    scan_dirs = [MODELS_DIR]
     for scan_base in scan_dirs:
         if not scan_base.exists():
             continue
