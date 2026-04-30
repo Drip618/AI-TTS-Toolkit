@@ -653,6 +653,7 @@ def install_tool(tool, base_dir, platform_info):
             ]
 
     # 执行安装命令
+    install_ok = True
     for cmd in tool['install']:
         if cmd.startswith('#'):
             print(f"  {C.YEL}  💡 {cmd[2:].strip()}{C.R}")
@@ -665,9 +666,13 @@ def install_tool(tool, base_dir, platform_info):
                 actual_cmd = f'source $(conda info --base)/etc/profile.d/conda.sh && conda activate {env_name} && echo "环境 {env_name} 已激活"'
             else:
                 actual_cmd = f'eval "$(conda shell.bash hook)" && conda activate {env_name} && echo "环境 {env_name} 已激活"'
-            run_cmd(actual_cmd)
+            result = run_cmd(actual_cmd)
+            if result.returncode != 0:
+                install_ok = False
         else:
-            run_cmd(cmd, cwd=tool_dir)
+            result = run_cmd(cmd, cwd=tool_dir)
+            if result.returncode != 0:
+                install_ok = False
 
     # Mac额外设置
     for cmd in mac_extra:
@@ -699,10 +704,13 @@ def install_tool(tool, base_dir, platform_info):
             f.write(f"  使用MPS(Metal)加速，比NVIDIA慢约30%\n")
         f.write(f"\n安装时间: 2026-04-30\n")
 
-    print(f"\n  {C.GRN}✅ {tool['name']} 安装完成{C.R}")
+    if install_ok:
+        print(f"\n  {C.GRN}✅ {tool['name']} 安装完成{C.R}")
+    else:
+        print(f"\n  {C.RED}❌ {tool['name']} 安装过程中有错误，请检查上方输出{C.R}")
     print(f"  📄 说明文件: {readme_path}")
 
-    return True
+    return install_ok
 
 # ═══════════════════════════════════════════════════════════════
 #  交互式 TUI
