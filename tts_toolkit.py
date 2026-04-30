@@ -12,7 +12,8 @@
     python3 tts_toolkit.py --list   # 列出所有工具
     python3 tts_toolkit.py --install 1,3,5  # 直接安装指定编号
 
-作者: 灵枢AI导演系统 | 版本: v1.0 | 2026-04-30
+作者: 灵枢AI导演系统 | 版本: v1.1 | 2026-04-30
+更新: v1.1 - 集成代理/SSL/PEP668/环境自动修复
 """
 
 import os
@@ -47,12 +48,18 @@ class C:
 def print_banner():
     banner = f"""
 {C.BLU}{C.BG_BLK}╔══════════════════════════════════════════════════════════════╗{C.R}
-{C.BLU}{C.BG_BLK}║{C.R}  {C.WHT}{C.B}🎙️  AI-TTS-Toolkit  全球TTS工具箱  v1.0{C.R}              {C.BLU}{C.BG_BLK}║{C.R}
+{C.BLU}{C.BG_BLK}║{C.R}  {C.WHT}{C.B}🎙️  AI-TTS-Toolkit  全球TTS工具箱  v1.1{C.R}              {C.BLU}{C.BG_BLK}║{C.R}
 {C.BLU}{C.BG_BLK}║{C.R}  {C.CYN}跨平台 · 零依赖 · 交互式安装 · 自由选配{C.R}              {C.BLU}{C.BG_BLK}║{C.R}
 {C.BLU}{C.BG_BLK}║{C.R}  {C.YEL}支持 macOS / Linux / Windows (WSL/Git Bash){C.R}       {C.BLU}{C.BG_BLK}║{C.R}
 {C.BLU}{C.BG_BLK}╚══════════════════════════════════════════════════════════════╝{C.R}
 """
     print(banner)
+
+# ═══════════════════════════════════════════════════════════════
+#  全局变量
+# ═══════════════════════════════════════════════════════════════
+
+PROXY_URL = None  # 代理地址，启动时检测
 
 # ═══════════════════════════════════════════════════════════════
 #  平台检测
@@ -93,6 +100,70 @@ def detect_platform():
     }
 
 # ═══════════════════════════════════════════════════════════════
+#  代理检测与网络修复
+# ═══════════════════════════════════════════════════════════════
+
+def detect_proxy():
+    """检测本地代理（Clash/V2Ray/Surge 等）"""
+    global PROXY_URL
+    ports = [7890, 7891, 1080, 1087, 1086, 8080]
+    for port in ports:
+        try:
+            result = subprocess.run(
+                ['curl', '-s', '-o', '/dev/null', '-w', '%{http_code}',
+                 '-x', f'http://127.0.0.1:{port}',
+                 'https://www.google.com', '--connect-timeout', '3'],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.stdout.strip() in ('200', '301', '302', '403'):
+                PROXY_URL = f'http://127.0.0.1:{port}'
+                return PROXY_URL
+        except:
+            continue
+    return None
+
+def setup_proxy_env():
+    """设置代理环境变量（让 curl/git/pip 走代理）"""
+    if PROXY_URL:
+        os.environ['http_proxy'] = PROXY_URL
+        os.environ['https_proxy'] = PROXY_URL
+        os.environ['HTTP_PROXY'] = PROXY_URL
+        os.environ['HTTPS_PROXY'] = PROXY_URL
+        # 不设置 all_proxy，避免干扰 Python aiohttp 等库
+        return True
+    return False
+
+def fix_ssl_cert():
+    """修复 macOS Homebrew Python 的 SSL 证书问题"""
+    try:
+        import certifi
+        cert_path = certifi.where()
+        os.environ['SSL_CERT_FILE'] = cert_path
+        os.environ['PIP_CERT'] = cert_path
+        os.environ['REQUESTS_CA_BUNDLE'] = cert_path
+        return cert_path
+    except ImportError:
+        return None
+
+def pip_install(pkg, extra_args=''):
+    """智能 pip 安装：自动处理 SSL/PEP668/代理"""
+    # 构建 pip 命令
+    cmd = f'pip3 install {pkg} {extra_args}'.strip()
+
+    # 检测 PEP 668（externally-managed-environment）
+    check = subprocess.run(
+        f'pip3 install {pkg} --dry-run 2>&1',
+        shell=True, capture_output=True, text=True, timeout=10
+    )
+    if 'externally-managed-environment' in check.stderr:
+        cmd += ' --break-system-packages'
+
+    # SSL 证书修复
+    fix_ssl_cert()
+
+    return run_cmd(cmd, check=False)
+
+# ═══════════════════════════════════════════════════════════════
 #  TTS 工具数据库（全球工具完整目录）
 # ═══════════════════════════════════════════════════════════════
 
@@ -118,7 +189,7 @@ TTS_TOOLS = [
             'pip install edge-tts',
         ],
         'test': 'edge-tts --text "你好世界" --write-media test.mp3',
-        'note': '最简单的TTS工具，调用微软云端API，无需本地GPU。适合快速配音、批量生成。',
+        'note': '最简单的TTS工具，调用微软云端API，无需本地GPU。适合快速配音、批量生成。\n\n⚠️ 如果在国内网络环境，edge-tts 需要 --proxy 参数：\n   edge-tts --proxy http://127.0.0.1:7890 --voice zh-CN-XiaoyiNeural --text "你好" --write-media test.mp3\n\n推荐中文声音：\n   zh-CN-XiaoyiNeural  年轻女声（日常/短视频）\n   zh-CN-YunyangNeural  成熟男声（影视解说/纪录片）\n   zh-CN-XiaoxuanNeural  甜美女声（广告/有声书）\n   zh-CN-YunjianNeural  浑厚男声（游戏/预告片）\n   zh-CN-liaoning-XiaobeiNeural  东北话男声（搞笑）',
     },
     {
         'id': 2,
@@ -130,7 +201,7 @@ TTS_TOOLS = [
         'desc_cn': '中文口语化天花板，情感丰富，适合对话/播客/有声书',
         'github': 'https://github.com/2noise/ChatTTS',
         'lang': 'Python',
-        'need_gpu': False,  # CPU也能跑，只是慢
+        'need_gpu': False,
         'need_conda': True,
         'disk_mb': 3000,
         'ram_mb': 4000,
@@ -420,7 +491,7 @@ TTS_TOOLS = [
         'disk_mb': 4000,
         'ram_mb': 6000,
         'difficulty': '⭐⭐⭐',
-        'platforms': ['linux', 'windows'],  # Mac支持有限
+        'platforms': ['linux', 'windows'],
         'install': [
             'conda create -n rtvc python=3.10 -y',
             'conda activate rtvc',
@@ -521,6 +592,21 @@ def check_prerequisites(platform_info):
     git_ok = shutil.which('git') is not None
     brew_ok = shutil.which('brew') is not None
 
+    # ─── 网络检测 ───
+    proxy = detect_proxy()
+    if proxy:
+        print(f"  代理: {C.GRN}✓ {proxy}{C.R}")
+        setup_proxy_env()
+    else:
+        print(f"  代理: {C.YEL}未检测到（Edge-TTS 等云端API可能需要）{C.R}")
+
+    # ─── SSL 证书修复 ───
+    cert_path = fix_ssl_cert()
+    if cert_path:
+        print(f"  SSL:  {C.GRN}✓ 证书已配置{C.R}")
+    else:
+        print(f"  SSL:  {C.YEL}⚠ certifi 未安装（pip 可能遇到 SSL 错误）{C.R}")
+
     print(f"  Brew:  {C.GRN}✓{C.R}" if brew_ok else f"  Brew:  {C.RED}✗{C.R}")
     print(f"  Conda: {C.GRN}✓{C.R}" if conda_ok else f"  Conda: {C.RED}✗{C.R}")
     print(f"  Pip:   {C.GRN}✓{C.R}" if pip_ok else f"  Pip:   {C.RED}✗{C.R}")
@@ -564,7 +650,6 @@ def check_prerequisites(platform_info):
     if not brew_ok and platform_info['is_mac']:
         print(f"  {C.BLU}[1] 安装 Homebrew...{C.R}")
         run_cmd('/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"', check=False)
-        # 添加到 PATH
         if platform_info['is_arm']:
             run_cmd('eval "$(/opt/homebrew/bin/brew shellenv)" && brew --version', check=False)
         else:
@@ -591,11 +676,9 @@ def check_prerequisites(platform_info):
         if platform_info['is_mac'] and brew_ok:
             run_cmd('brew install --cask miniconda')
         elif platform_info['is_linux']:
-            # Linux: 下载安装脚本
             run_cmd('curl -fsSL https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -o /tmp/miniconda.sh && bash /tmp/miniconda.sh -b -p $HOME/miniconda3', check=False)
         elif platform_info['is_windows']:
             run_cmd('conda install miniconda -y', check=False)
-        # 初始化 conda
         if shutil.which('conda'):
             if platform_info['is_mac']:
                 run_cmd('eval "$($(brew --prefix)/Caskroom/miniconda/base/bin/conda shell.bash hook)" && conda init zsh', check=False)
@@ -604,11 +687,18 @@ def check_prerequisites(platform_info):
         conda_ok = shutil.which('conda') is not None
         print(f"  Conda: {C.GRN}✓ 安装成功{C.R}" if conda_ok else f"  Conda: {C.RED}✗ 安装失败{C.R}")
 
-    # 4. Pip
+    # 4. Pip（处理 SSL 和 PEP 668）
     if not pip_ok:
         print(f"  {C.BLU}[4] 安装 Pip...{C.R}")
-        run_cmd('python3 -m ensurepip --upgrade 2>/dev/null || python3 -m pip install --upgrade pip', check=False)
+        # 先尝试 ensurepip
+        run_cmd('python3 -m ensurepip --upgrade 2>/dev/null', check=False)
         pip_ok = shutil.which('pip') is not None or shutil.which('pip3') is not None
+        if not pip_ok:
+            # ensurepip 失败，用 get-pip.py
+            print(f"  {C.YEL}  ensurepip 失败，尝试 get-pip.py...{C.R}")
+            fix_ssl_cert()  # 确保 SSL 证书可用
+            run_cmd('curl -fsSL https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py && python3 /tmp/get-pip.py', check=False)
+            pip_ok = shutil.which('pip') is not None or shutil.which('pip3') is not None
         print(f"  Pip: {C.GRN}✓ 安装成功{C.R}" if pip_ok else f"  Pip: {C.RED}✗ 安装失败{C.R}")
 
     # 最终检查
@@ -625,7 +715,6 @@ def check_prerequisites(platform_info):
     if not final_ok:
         print(f"  {C.YEL}⚠️  部分环境安装失败，但不影响 Edge-TTS 等简单工具的使用。{C.R}")
         print(f"  {C.YEL}   如需安装全部工具，请手动安装缺失项后重新运行。{C.R}")
-        # 不返回 False，让用户继续选择工具（Edge-TTS 不需要 conda）
     return True
 
 def install_tool(tool, base_dir, platform_info):
@@ -639,6 +728,8 @@ def install_tool(tool, base_dir, platform_info):
     print(f"  📁 安装路径: {tool_dir}")
     print(f"  💾 预计占用: {tool['disk_mb']}MB 磁盘 / {tool['ram_mb']}MB 内存")
     print(f"  ⚙️  难度: {tool['difficulty']}  |  GPU: {'需要' if tool['need_gpu'] else '不需要'}")
+    if PROXY_URL:
+        print(f"  🌐 代理: {PROXY_URL}")
     print()
 
     # 创建目录
@@ -698,6 +789,11 @@ def install_tool(tool, base_dir, platform_info):
         f.write(f"  {tool['test']}\n")
         f.write(f"\n--- 使用说明 ---\n")
         f.write(f"  {tool['note']}\n")
+        if PROXY_URL:
+            f.write(f"\n--- 代理设置 ---\n")
+            f.write(f"  检测到代理: {PROXY_URL}\n")
+            f.write(f"  export http_proxy={PROXY_URL}\n")
+            f.write(f"  export https_proxy={PROXY_URL}\n")
         f.write(f"\n--- Mac Apple Silicon 注意 ---\n")
         if platform_info['is_mac'] and platform_info['is_arm']:
             f.write(f"  export PYTORCH_ENABLE_MPS_FALLBACK=1\n")
@@ -729,7 +825,6 @@ def print_tool_list(platform_info):
         print(f"\n  {C.B}{cat}{C.R}")
         print(f"  {'─' * 60}")
         for tool in tools:
-            # 平台兼容性
             compatible = any(p in tool['platforms'] for p in
                            (['mac'] if platform_info['is_mac'] else
                             ['linux'] if platform_info['is_linux'] else
@@ -760,7 +855,6 @@ def get_selection(platform_info):
             if choice.lower() == 'all':
                 return [t['id'] for t in TTS_TOOLS]
 
-            # 解析范围 (如 1-5)
             ids = set()
             for part in choice.split(','):
                 part = part.strip()
@@ -770,7 +864,6 @@ def get_selection(platform_info):
                 else:
                     ids.add(int(part))
 
-            # 验证
             valid_ids = {t['id'] for t in TTS_TOOLS}
             invalid = ids - valid_ids
             if invalid:
@@ -795,9 +888,7 @@ def get_install_dir():
             choice = input(f"  {C.B}▶ {C.R}").strip()
             if not choice:
                 return default
-            # 展开 ~
             choice = os.path.expanduser(choice)
-            # 验证
             parent = os.path.dirname(choice) or choice
             if os.path.isdir(parent) or parent == choice:
                 return choice
@@ -812,10 +903,8 @@ def get_install_dir():
 def main():
     print_banner()
 
-    # 平台检测
     platform_info = detect_platform()
 
-    # 命令行参数处理
     if '--list' in sys.argv:
         print_tool_list(platform_info)
         return
@@ -837,27 +926,22 @@ def main():
     # ─── 交互式安装流程 ───
     print(f"  {C.WHT}检测到系统: {platform_info['label']}{C.R}\n")
 
-    # 检查前置条件（缺失的会自动安装）
     if not check_prerequisites(platform_info):
         return
 
-    # 显示工具列表
     print(f"\n{C.B}  📦 可用TTS工具（共{len(TTS_TOOLS)}个）{C.R}\n")
     print_tool_list(platform_info)
 
-    # 获取安装目录
     base_dir = get_install_dir()
     print(f"\n  {C.GRN}📁 安装目录: {base_dir}{C.R}")
     os.makedirs(base_dir, exist_ok=True)
 
-    # 获取用户选择
     selected_ids = get_selection(platform_info)
 
     if not selected_ids:
         print(f"\n  {C.YEL}未选择任何工具，退出。{C.R}")
         return
 
-    # 确认安装
     selected_tools = [t for t in TTS_TOOLS if t['id'] in selected_ids]
     total_disk = sum(t['disk_mb'] for t in selected_tools)
     total_ram = max(t['ram_mb'] for t in selected_tools) if selected_tools else 0
@@ -870,6 +954,8 @@ def main():
     print(f"  {C.WHT}共 {len(selected_tools)} 个工具{C.R}")
     print(f"  {C.WHT}预计磁盘: ~{total_disk}MB{C.R}")
     print(f"  {C.WHT}最大内存: ~{total_ram}MB{C.R}")
+    if PROXY_URL:
+        print(f"  {C.WHT}网络代理: {PROXY_URL}{C.R}")
     print()
 
     confirm = input(f"  {C.YEL}确认安装？(y/n): {C.R}").strip().lower()
@@ -877,7 +963,6 @@ def main():
         print(f"  {C.YEL}已取消。{C.R}")
         return
 
-    # 执行安装
     print(f"\n{C.GRN}{C.B}  🚀 开始安装...{C.R}\n")
 
     success = []
@@ -891,7 +976,6 @@ def main():
             print(f"  {C.RED}❌ {tool['name']} 安装失败: {e}{C.R}")
             failed.append(tool['name'])
 
-    # 安装总结
     print(f"\n{C.BLU}{'═' * 50}{C.R}")
     print(f"{C.BLU}  📊 安装总结{C.R}")
     print(f"{C.BLU}{'═' * 50}{C.R}")
@@ -902,7 +986,10 @@ def main():
     print(f"\n  {C.YEL}💡 使用提示:{C.R}")
     print(f"  {C.D}  - 首次运行需下载模型，请耐心等待{C.R}")
     print(f"  {C.D}  - 各工具目录下有 README_灵枢TTS工具箱.txt 说明文件{C.R}")
-    print(f"  {C.D}  - Edge-TTS 最简单: pip install edge-tts && edge-tts --text '你好' --write-media test.mp3{C.R}")
+    if PROXY_URL:
+        print(f"  {C.D}  - Edge-TTS 用法: edge-tts --proxy {PROXY_URL} --voice zh-CN-XiaoyiNeural --text '你好' --write-media test.mp3{C.R}")
+    else:
+        print(f"  {C.D}  - Edge-TTS 用法: edge-tts --voice zh-CN-XiaoyiNeural --text '你好' --write-media test.mp3{C.R}")
     print()
 
 if __name__ == '__main__':
