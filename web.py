@@ -428,12 +428,21 @@ class ModelProcessManager:
         model_path = engine.model_path
         start_cmd = engine.start_command
 
-        # GPT-SoVITS 需要参考音频参数，自动查找
-        if engine.api_format == "gpt-sovits" and "-dr" not in start_cmd:
-            refer_wav, refer_text = self._find_gpt_sovits_refer(model_path)
-            if refer_wav:
-                start_cmd = f'{start_cmd} -dr "{refer_wav}" -dt "{refer_text}" -dl zh'
-                log(f"GPT-SoVITS 自动添加参考音频: {refer_wav}")
+        # GPT-SoVITS 特殊处理
+        if engine.api_format == "gpt-sovits":
+            # 自动添加模型权重参数（-s SoVITS, -g GPT）
+            if "-s " not in start_cmd:
+                pretrained = self._find_gpt_sovits_pretrained(model_path)
+                if pretrained.get("sovits") and pretrained.get("gpt"):
+                    start_cmd = f'{start_cmd} -s "{pretrained["sovits"]}" -g "{pretrained["gpt"]}"'
+                    log(f"GPT-SoVITS 使用预训练模型: {pretrained['sovits']}")
+
+            # 自动添加参考音频参数
+            if "-dr" not in start_cmd:
+                refer_wav, refer_text = self._find_gpt_sovits_refer(model_path)
+                if refer_wav:
+                    start_cmd = f'{start_cmd} -dr "{refer_wav}" -dt "{refer_text}" -dl zh'
+                    log(f"GPT-SoVITS 参考音频: {refer_wav}")
 
         # 查找 conda 的初始化脚本
         conda_init = ""
@@ -455,6 +464,37 @@ class ModelProcessManager:
             shell_cmd = start_cmd
 
         return f'cd "{model_path}" && {shell_cmd}'
+
+    def _find_gpt_sovits_pretrained(self, model_path):
+        """查找 GPT-SoVITS 预训练模型权重文件"""
+        mp = Path(model_path)
+        # 预训练模型目录
+        pretrained_dirs = [
+            mp / "GPT_SoVITS" / "pretrained_models" / "gsv-v2final-pretrained",
+            mp / "GPT_SoVITS" / "pretrained_models",
+            mp / "pretrained_models",
+        ]
+        result = {}
+        for d in pretrained_dirs:
+            if not d.exists():
+                continue
+            # 查找 SoVITS 模型（s2D*.pth）
+            if not result.get("sovits"):
+                for f in d.glob("s2D*.pth"):
+                    result["sovits"] = str(f)
+                    break
+            # 查找 GPT 模型（s2G*.pth 或 s1*.ckpt）
+            if not result.get("gpt"):
+                for f in d.glob("s2G*.pth"):
+                    result["gpt"] = str(f)
+                    break
+                if not result.get("gpt"):
+                    for f in d.glob("s1*.ckpt"):
+                        result["gpt"] = str(f)
+                        break
+            if result.get("sovits") and result.get("gpt"):
+                break
+        return result
 
     def _find_gpt_sovits_refer(self, model_path):
         """在 GPT-SoVITS 目录中自动查找参考音频"""
