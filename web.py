@@ -373,6 +373,7 @@ class LocalModelEngine(TTSEngine):
                 "text": text.strip(),
                 "text_language": "zh",
                 "speed": speed,
+                "spk": "",  # 不使用预设说话人，用参考音频
             }
 
             # 如果用户通过 UI 上传了参考音频，直接放在请求里
