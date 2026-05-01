@@ -354,6 +354,9 @@ class LocalModelEngine(TTSEngine):
         if not base or not self._is_api_running():
             raise RuntimeError(f"{self.name} API 未运行！\n请先在 UI 中切换到该引擎，系统会自动启动。")
         import urllib.request
+        # 绕过代理访问本地服务（防止 VPN/代理把 localhost 请求转发到外网）
+        no_proxy_handler = urllib.request.ProxyHandler({})
+        opener = urllib.request.build_opener(no_proxy_handler)
 
         if self.api_format == "gpt-sovits":
             # GPT-SoVITS 专用格式：POST / {"text", "text_language", "speed"}
@@ -369,7 +372,7 @@ class LocalModelEngine(TTSEngine):
             endpoint = self.api_endpoint or "/"
             req = urllib.request.Request(f"{base}{endpoint}", data=payload, headers={'Content-Type': 'application/json'})
             try:
-                with urllib.request.urlopen(req, timeout=120) as resp:
+                with opener.open(req, timeout=120) as resp:
                     audio_data = resp.read()
             except urllib.error.HTTPError as e:
                 err_body = e.read().decode('utf-8', errors='replace')
@@ -391,7 +394,7 @@ class LocalModelEngine(TTSEngine):
                 "pitch": float(pitch) if str(pitch).lstrip('-').isdigit() else 0,
             }).encode('utf-8')
             req = urllib.request.Request(f"{base}{self.api_endpoint}", data=payload, headers={'Content-Type': 'application/json'})
-            with urllib.request.urlopen(req, timeout=120) as resp:
+            with opener.open(req, timeout=120) as resp:
                 with open(output_path, 'wb') as f:
                     f.write(resp.read())
 
