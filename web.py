@@ -362,8 +362,20 @@ class LocalModelEngine(TTSEngine):
         opener = urllib.request.build_opener(no_proxy_handler)
 
         if self.api_format == "gpt-sovits":
-            # GPT-SoVITS 专用格式：POST / {"text", "text_language", "speed"}
-            # 如果用户通过 UI 上传了参考音频，先用 /change_refer 设置
+            # GPT-SoVITS 专用格式：POST / {"text", "text_language", "speed", "refer_wav_path", ...}
+            try:
+                speed = 1.0 + float(rate) / 100
+            except (ValueError, TypeError):
+                speed = 1.0
+
+            # 构建请求 payload，包含参考音频
+            payload_dict = {
+                "text": text.strip(),
+                "text_language": "zh",
+                "speed": speed,
+            }
+
+            # 如果用户通过 UI 上传了参考音频，直接放在请求里
             if clone_refer_info.get("path") and os.path.exists(clone_refer_info["path"]):
                 refer_path = clone_refer_info["path"]
                 # GPT-SoVITS 需要 WAV 格式，自动转换 MP3 等格式
@@ -378,27 +390,12 @@ class LocalModelEngine(TTSEngine):
                             log(f"参考音频已转换为 WAV: {wav_path}")
                     except Exception as e:
                         log(f"音频转换失败: {e}")
-                try:
-                    refer_payload = json.dumps({
-                        "refer_wav_path": refer_path,
-                        "prompt_text": clone_refer_info.get("text", "请使用此音频作为参考。"),
-                        "prompt_language": "zh",
-                    }).encode('utf-8')
-                    refer_req = urllib.request.Request(f"{base}/change_refer", data=refer_payload, headers={'Content-Type': 'application/json'})
-                    with opener.open(refer_req, timeout=10) as resp:
-                        resp.read()
-                    log(f"GPT-SoVITS 已设置参考音频: {refer_path}")
-                except Exception as e:
-                    log(f"GPT-SoVITS 设置参考音频失败: {e}")
-            try:
-                speed = 1.0 + float(rate) / 100
-            except (ValueError, TypeError):
-                speed = 1.0
-            payload = json.dumps({
-                "text": text.strip(),
-                "text_language": "zh",
-                "speed": speed,
-            }).encode('utf-8')
+                payload_dict["refer_wav_path"] = refer_path
+                payload_dict["prompt_text"] = clone_refer_info.get("text", "请使用此音频作为参考。")
+                payload_dict["prompt_language"] = "zh"
+                log(f"GPT-SoVITS 使用参考音频: {refer_path}")
+
+            payload = json.dumps(payload_dict).encode('utf-8')
             endpoint = self.api_endpoint or "/"
             req = urllib.request.Request(f"{base}{endpoint}", data=payload, headers={'Content-Type': 'application/json'})
             try:
@@ -408,7 +405,7 @@ class LocalModelEngine(TTSEngine):
                 err_body = e.read().decode('utf-8', errors='replace')
                 raise RuntimeError(f"{self.name} 生成失败 (HTTP {e.code}): {err_body}")
             except Exception as e:
-                raise RuntimeError(f"{self.name} 生成失败: {e}\n\n💡 提示：参考音频建议 3-10 秒，过长可能导致失败")
+                raise RuntimeError(f"{self.name} 生成失败: {e}\n\n💡 提示：参考音频建议 3-10 秒 WAV 格式")
             if not audio_data or len(audio_data) < 100:
                 raise RuntimeError(f"{self.name} 生成了无效音频（{len(audio_data)} bytes）")
             with open(output_path, 'wb') as f:
