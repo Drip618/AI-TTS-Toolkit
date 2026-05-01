@@ -365,16 +365,29 @@ class LocalModelEngine(TTSEngine):
             # GPT-SoVITS 专用格式：POST / {"text", "text_language", "speed"}
             # 如果用户通过 UI 上传了参考音频，先用 /change_refer 设置
             if clone_refer_info.get("path") and os.path.exists(clone_refer_info["path"]):
+                refer_path = clone_refer_info["path"]
+                # GPT-SoVITS 需要 WAV 格式，自动转换 MP3 等格式
+                if not refer_path.lower().endswith('.wav'):
+                    wav_path = str(Path(refer_path).with_suffix('.wav'))
+                    try:
+                        import subprocess as sp
+                        sp.run(['ffmpeg', '-y', '-i', refer_path, '-ar', '32000', '-ac', '1', wav_path],
+                               capture_output=True, timeout=30)
+                        if os.path.exists(wav_path):
+                            refer_path = wav_path
+                            log(f"参考音频已转换为 WAV: {wav_path}")
+                    except Exception as e:
+                        log(f"音频转换失败: {e}")
                 try:
                     refer_payload = json.dumps({
-                        "refer_wav_path": clone_refer_info["path"],
+                        "refer_wav_path": refer_path,
                         "prompt_text": clone_refer_info.get("text", "请使用此音频作为参考。"),
                         "prompt_language": "zh",
                     }).encode('utf-8')
                     refer_req = urllib.request.Request(f"{base}/change_refer", data=refer_payload, headers={'Content-Type': 'application/json'})
                     with opener.open(refer_req, timeout=10) as resp:
                         resp.read()
-                    log(f"GPT-SoVITS 已设置参考音频: {clone_refer_info['path']}")
+                    log(f"GPT-SoVITS 已设置参考音频: {refer_path}")
                 except Exception as e:
                     log(f"GPT-SoVITS 设置参考音频失败: {e}")
             try:
