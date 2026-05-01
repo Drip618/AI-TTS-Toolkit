@@ -31,17 +31,17 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 
 # ═══════════════════════════════════════════════════════════════
-#  全局代理绕过 — 确保所有 urllib 请求到 localhost 不走系统代理
+#  代理配置
 #  （解决 Clash/VPN 等代理把 127.0.0.1 请求转发到外网的问题）
+#  策略：只对 localhost 请求绕过代理，其他请求正常走代理
 # ═══════════════════════════════════════════════════════════════
 
-# 清除所有代理环境变量（防止子进程和 urllib 继承）
-for _proxy_key in ['http_proxy', 'https_proxy', 'HTTP_PROXY', 'HTTPS_PROXY', 'all_proxy', 'ALL_PROXY', 'no_proxy', 'NO_PROXY']:
-    os.environ.pop(_proxy_key, None)
-
-# 安装全局无代理 opener（覆盖 urllib.request.urlopen 的默认行为）
-_no_proxy_opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-urllib.request.install_opener(_no_proxy_opener)
+# 将 localhost 加入 no_proxy 环境变量（不删除代理，只排除本地地址）
+_no_proxy_val = os.environ.get('no_proxy', os.environ.get('NO_PROXY', ''))
+if 'localhost' not in _no_proxy_val:
+    os.environ['no_proxy'] = ','.join(filter(None, [_no_proxy_val, 'localhost', '127.0.0.1', '::1']))
+if 'NO_PROXY' not in os.environ:
+    os.environ['NO_PROXY'] = os.environ.get('no_proxy', '')
 
 # ═══════════════════════════════════════════════════════════════
 #  全局配置
@@ -370,8 +370,7 @@ class LocalModelEngine(TTSEngine):
         base = self._get_base_url()
         if not base or not self._is_api_running():
             raise RuntimeError(f"{self.name} API 未运行！\n请先在 UI 中切换到该引擎，系统会自动启动。")
-        # 注意：代理已在模块级别通过 install_opener 全局绕过，
-        # 无需在每次请求时临时清除环境变量
+        # 对 localhost 请求使用无代理 opener（其他请求不受影响）
         no_proxy_handler = urllib.request.ProxyHandler({})
         opener = urllib.request.build_opener(no_proxy_handler)
 
