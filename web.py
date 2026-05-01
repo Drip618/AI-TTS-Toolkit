@@ -357,76 +357,79 @@ class LocalModelEngine(TTSEngine):
         if not base or not self._is_api_running():
             raise RuntimeError(f"{self.name} API 未运行！\n请先在 UI 中切换到该引擎，系统会自动启动。")
         import urllib.request
+        import urllib.error
+        import os
         # 绕过代理访问本地服务（防止 VPN/代理把 localhost 请求转发到外网）
-        no_proxy_handler = urllib.request.ProxyHandler({})
-        opener = urllib.request.build_opener(no_proxy_handler)
+        old_env = {}
+        for k in ['http_proxy', 'https_proxy', 'HTTP_PROXY', 'HTTPS_PROXY', 'all_proxy', 'ALL_PROXY']:
+            if k in os.environ:
+                old_env[k] = os.environ.pop(k)
+        try:
+            no_proxy_handler = urllib.request.ProxyHandler({})
+            opener = urllib.request.build_opener(no_proxy_handler)
 
-        if self.api_format == "gpt-sovits":
-            # GPT-SoVITS 专用格式：POST / {"text", "text_language", "speed", "refer_wav_path", ...}
-            try:
-                speed = 1.0 + float(rate) / 100
-            except (ValueError, TypeError):
-                speed = 1.0
-
-            # 构建请求 payload，包含参考音频
-            payload_dict = {
-                "text": text.strip(),
-                "text_language": "zh",
-                "speed": speed,
-                "spk": "",  # 不使用预设说话人，用参考音频
-            }
-
-            # 如果用户通过 UI 上传了参考音频，直接放在请求里
-            if clone_refer_info.get("path") and os.path.exists(clone_refer_info["path"]):
-                refer_path = clone_refer_info["path"]
-                # GPT-SoVITS 需要 WAV 格式，自动转换 MP3 等格式
-                if not refer_path.lower().endswith('.wav'):
-                    wav_path = str(Path(refer_path).with_suffix('.wav'))
-                    try:
-                        import subprocess as sp
-                        sp.run(['ffmpeg', '-y', '-i', refer_path, '-ar', '32000', '-ac', '1', wav_path],
-                               capture_output=True, timeout=30)
-                        if os.path.exists(wav_path):
-                            refer_path = wav_path
-                            log(f"参考音频已转换为 WAV: {wav_path}")
-                    except Exception as e:
-                        log(f"音频转换失败: {e}")
-                payload_dict["refer_wav_path"] = refer_path
-                payload_dict["prompt_text"] = clone_refer_info.get("text", "请使用此音频作为参考。")
-                payload_dict["prompt_language"] = "zh"
-                log(f"GPT-SoVITS 使用参考音频: {refer_path}")
-
-            payload = json.dumps(payload_dict).encode('utf-8')
-            endpoint = self.api_endpoint or "/"
-            req = urllib.request.Request(f"{base}{endpoint}", data=payload, headers={'Content-Type': 'application/json'})
-            try:
-                with opener.open(req, timeout=120) as resp:
-                    audio_data = resp.read()
-            except urllib.error.HTTPError as e:
-                err_body = e.read().decode('utf-8', errors='replace')
-                raise RuntimeError(f"{self.name} 生成失败 (HTTP {e.code}): {err_body}")
-            except Exception as e:
-                raise RuntimeError(f"{self.name} 生成失败: {e}\n\n💡 提示：参考音频建议 3-10 秒 WAV 格式")
-            if not audio_data or len(audio_data) < 100:
-                raise RuntimeError(f"{self.name} 生成了无效音频（{len(audio_data)} bytes）")
-            with open(output_path, 'wb') as f:
-                f.write(audio_data)
-        else:
-            # 标准格式：POST /api/tts {"text", "voice", "speed", "pitch"}
-            try:
-                speed = 1.0 + float(rate) / 100
-            except (ValueError, TypeError):
-                speed = 1.0
-            payload = json.dumps({
-                "text": text.strip(),
-                "voice": voice,
-                "speed": speed,
-                "pitch": float(pitch) if str(pitch).lstrip('-').isdigit() else 0,
-            }).encode('utf-8')
-            req = urllib.request.Request(f"{base}{self.api_endpoint}", data=payload, headers={'Content-Type': 'application/json'})
-            with opener.open(req, timeout=120) as resp:
+            if self.api_format == "gpt-sovits":
+                # GPT-SoVITS 专用格式
+                try:
+                    speed = 1.0 + float(rate) / 100
+                except (ValueError, TypeError):
+                    speed = 1.0
+                payload_dict = {
+                    "text": text.strip(),
+                    "text_language": "zh",
+                    "speed": speed,
+                    "spk": "",
+                }
+                if clone_refer_info.get("path") and os.path.exists(clone_refer_info["path"]):
+                    refer_path = clone_refer_info["path"]
+                    if not refer_path.lower().endswith('.wav'):
+                        wav_path = str(Path(refer_path).with_suffix('.wav'))
+                        try:
+                            import subprocess as sp
+                            sp.run(['ffmpeg', '-y', '-i', refer_path, '-ar', '32000', '-ac', '1', wav_path],
+                                   capture_output=True, timeout=30)
+                            if os.path.exists(wav_path):
+                                refer_path = wav_path
+                                log(f"参考音频已转换为 WAV: {wav_path}")
+                        except Exception as e:
+                            log(f"音频转换失败: {e}")
+                    payload_dict["refer_wav_path"] = refer_path
+                    payload_dict["prompt_text"] = clone_refer_info.get("text", "请使用此音频作为参考。")
+                    payload_dict["prompt_language"] = "zh"
+                    log(f"GPT-SoVITS 使用参考音频: {refer_path}")
+                payload = json.dumps(payload_dict).encode('utf-8')
+                endpoint = self.api_endpoint or "/"
+                req = urllib.request.Request(f"{base}{endpoint}", data=payload, headers={'Content-Type': 'application/json'})
+                try:
+                    with opener.open(req, timeout=120) as resp:
+                        audio_data = resp.read()
+                except urllib.error.HTTPError as e:
+                    err_body = e.read().decode('utf-8', errors='replace')
+                    raise RuntimeError(f"{self.name} 生成失败 (HTTP {e.code}): {err_body}")
+                except Exception as e:
+                    raise RuntimeError(f"{self.name} 生成失败: {e}\n\n💡 提示：参考音频建议 3-10 秒 WAV 格式")
+                if not audio_data or len(audio_data) < 100:
+                    raise RuntimeError(f"{self.name} 生成了无效音频（{len(audio_data)} bytes）")
                 with open(output_path, 'wb') as f:
-                    f.write(resp.read())
+                    f.write(audio_data)
+            else:
+                # 标准格式
+                try:
+                    speed = 1.0 + float(rate) / 100
+                except (ValueError, TypeError):
+                    speed = 1.0
+                payload = json.dumps({
+                    "text": text.strip(),
+                    "voice": voice,
+                    "speed": speed,
+                    "pitch": float(pitch) if str(pitch).lstrip('-').isdigit() else 0,
+                }).encode('utf-8')
+                req = urllib.request.Request(f"{base}{self.api_endpoint}", data=payload, headers={'Content-Type': 'application/json'})
+                with opener.open(req, timeout=120) as resp:
+                    with open(output_path, 'wb') as f:
+                        f.write(resp.read())
+        finally:
+            os.environ.update(old_env)
 
         if os.path.exists(output_path) and os.path.getsize(output_path) == 0:
             os.unlink(output_path)
