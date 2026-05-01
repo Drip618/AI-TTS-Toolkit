@@ -31,19 +31,6 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 
 # ═══════════════════════════════════════════════════════════════
-#  代理配置
-#  （解决 Clash/VPN 等代理把 127.0.0.1 请求转发到外网的问题）
-#  策略：只对 localhost 请求绕过代理，其他请求正常走代理
-# ═══════════════════════════════════════════════════════════════
-
-# 将 localhost 加入 no_proxy 环境变量（不删除代理，只排除本地地址）
-_no_proxy_val = os.environ.get('no_proxy', os.environ.get('NO_PROXY', ''))
-if 'localhost' not in _no_proxy_val:
-    os.environ['no_proxy'] = ','.join(filter(None, [_no_proxy_val, 'localhost', '127.0.0.1', '::1']))
-if 'NO_PROXY' not in os.environ:
-    os.environ['NO_PROXY'] = os.environ.get('no_proxy', '')
-
-# ═══════════════════════════════════════════════════════════════
 #  全局配置
 # ═══════════════════════════════════════════════════════════════
 
@@ -284,6 +271,35 @@ class EdgeTTSEngine(TTSEngine):
                 return p
         return "edge-tts"
 
+    def _curl_post(self, url, payload_dict, timeout=120):
+        """使用 curl 发送 POST 请求（绕过 macOS 系统级代理 Clash/VPN）"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump(payload_dict, f, ensure_ascii=False)
+            tmp_json = f.name
+        try:
+            cmd = [
+                'curl', '--noproxy', '*',
+                '-X', 'POST', url,
+                '-H', 'Content-Type: application/json',
+                '-d', f'@{tmp_json}',
+                '--max-time', str(timeout),
+                '-s', '-o', '-',
+            ]
+            result = subprocess.run(cmd, capture_output=True, timeout=timeout + 10)
+            if result.returncode == 0 and result.stdout and len(result.stdout) > 0:
+                try:
+                    err = json.loads(result.stdout)
+                    if isinstance(err, dict) and err.get('code') == 400:
+                        raise RuntimeError(f"{self.name} API 错误: {err.get('message', result.stdout.decode('utf-8', errors='replace'))}")
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    pass
+                return result.stdout
+            else:
+                stderr = result.stderr.decode('utf-8', errors='replace') if result.stderr else ''
+                raise RuntimeError(f"curl 请求失败 (exit code {result.returncode}): {stderr[:300]}")
+        finally:
+            os.unlink(tmp_json)
+
     def generate(self, text, voice, output_path, rate=0, pitch=0, **kwargs):
         text, voice = text.strip(), voice.strip()
         # rate: 数字 → edge-tts 格式（如 20 → "+20%", -10 → "-10%"）
@@ -370,9 +386,6 @@ class LocalModelEngine(TTSEngine):
         base = self._get_base_url()
         if not base or not self._is_api_running():
             raise RuntimeError(f"{self.name} API 未运行！\n请先在 UI 中切换到该引擎，系统会自动启动。")
-        # 对 localhost 请求使用无代理 opener（其他请求不受影响）
-        no_proxy_handler = urllib.request.ProxyHandler({})
-        opener = urllib.request.build_opener(no_proxy_handler)
 
         if self.api_format == "gpt-sovits":
             # GPT-SoVITS 专用格式
@@ -407,31 +420,7 @@ class LocalModelEngine(TTSEngine):
                 payload_dict["prompt_text"] = clone_refer_info.get("text", "请使用此音频作为参考。")
                 payload_dict["prompt_language"] = "zh"
                 log(f"GPT-SoVITS 使用参考音频: {refer_path}")
-            payload = json.dumps(payload_dict).encode('utf-8')
-            endpoint = self.api_endpoint or "/"
-            req = urllib.request.Request(f"{base}{endpoint}", data=payload, headers={'Content-Type': 'application/json'})
-            try:
-                with opener.open(req, timeout=120) as resp:
-                    audio_data = resp.read()
-            except urllib.error.HTTPError as e:
-                err_body = e.read().decode('utf-8', errors='replace')
-                raise RuntimeError(f"{self.name} 生成失败 (HTTP {e.code}): {err_body}")
-            except urllib.error.URLError as e:
-                raise RuntimeError(f"{self.name} 连接失败: {e.reason}\n\n请检查 {self.name} API 是否在运行（端口 {self.api_port}）")
-            except ConnectionError as e:
-                raise RuntimeError(f"{self.name} 连接失败: {e}\n\n请检查 {self.name} API 是否在运行（端口 {self.api_port}）")
-            except Exception as e:
-                err_msg = str(e)
-                # IncompleteRead 通常意味着代理干扰或服务端提前断开
-                if 'IncompleteRead' in err_msg or 'timed out' in err_msg.lower():
-                    raise RuntimeError(
-                        f"{self.name} 生成失败: {err_msg}\n\n"
-                        f"可能原因：\n"
-                        f"  1. 系统代理（如 Clash/VPN）拦截了 localhost 请求\n"
-                        f"  2. {self.name} API 服务不稳定\n"
-                        f"建议：在终端运行 curl --noproxy '*' http://127.0.0.1:{self.api_port}/ 测试连通性"
-                    )
-                raise RuntimeError(f"{self.name} 生成失败: {err_msg}\n\n提示：参考音频建议 3-10 秒 WAV 格式")
+            audio_data = self._curl_post(base + (self.api_endpoint or "/"), payload_dict, timeout=120)
             if not audio_data or len(audio_data) < 100:
                 raise RuntimeError(f"{self.name} 生成了无效音频（{len(audio_data)} bytes）")
             with open(output_path, 'wb') as f:
@@ -442,32 +431,15 @@ class LocalModelEngine(TTSEngine):
                 speed = 1.0 + float(rate) / 100
             except (ValueError, TypeError):
                 speed = 1.0
-            payload = json.dumps({
+            payload = {
                 "text": text.strip(),
                 "voice": voice,
                 "speed": speed,
                 "pitch": float(pitch) if str(pitch).lstrip('-').isdigit() else 0,
-            }).encode('utf-8')
-            req = urllib.request.Request(f"{base}{self.api_endpoint}", data=payload, headers={'Content-Type': 'application/json'})
-            try:
-                with opener.open(req, timeout=120) as resp:
-                    with open(output_path, 'wb') as f:
-                        f.write(resp.read())
-            except urllib.error.HTTPError as e:
-                err_body = e.read().decode('utf-8', errors='replace')
-                raise RuntimeError(f"{self.name} 生成失败 (HTTP {e.code}): {err_body}")
-            except urllib.error.URLError as e:
-                raise RuntimeError(f"{self.name} 连接失败: {e.reason}\n\n请检查 {self.name} API 是否在运行（端口 {self.api_port}）")
-            except ConnectionError as e:
-                raise RuntimeError(f"{self.name} 连接失败: {e}\n\n请检查 {self.name} API 是否在运行（端口 {self.api_port}）")
-            except Exception as e:
-                err_msg = str(e)
-                if 'IncompleteRead' in err_msg or 'timed out' in err_msg.lower():
-                    raise RuntimeError(
-                        f"{self.name} 生成失败: {err_msg}\n\n"
-                        f"可能原因：系统代理拦截了 localhost 请求，或 API 服务不稳定"
-                    )
-                raise RuntimeError(f"{self.name} 生成失败: {err_msg}")
+            }
+            audio_data = self._curl_post(base + self.api_endpoint, payload, timeout=120)
+            with open(output_path, 'wb') as f:
+                f.write(audio_data)
 
         if os.path.exists(output_path) and os.path.getsize(output_path) == 0:
             os.unlink(output_path)
@@ -481,11 +453,10 @@ class LocalModelEngine(TTSEngine):
         base = self._get_base_url()
         if base and self._is_api_running():
             try:
-                no_proxy_handler = urllib.request.ProxyHandler({})
-                opener = urllib.request.build_opener(no_proxy_handler)
-                req = urllib.request.Request(f"{base}{self.voice_endpoint}", method='GET')
-                with opener.open(req, timeout=5) as resp:
-                    data = json.loads(resp.read().decode('utf-8'))
+                cmd = ['curl', '--noproxy', '*', '-s', '-o', '-', '--max-time', '5', f"{base}{self.voice_endpoint}"]
+                result = subprocess.run(cmd, capture_output=True, timeout=10)
+                if result.returncode == 0 and result.stdout:
+                    data = json.loads(result.stdout.decode('utf-8'))
                     if isinstance(data, list):
                         return [(v, v) for v in data]
             except Exception:
