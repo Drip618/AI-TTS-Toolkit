@@ -101,6 +101,9 @@ def log(msg):
     except:
         pass
 
+# 全局状态
+clone_refer_info = {"path": "", "text": ""}  # 用户通过 UI 上传的参考音频
+
 # ═══════════════════════════════════════════════════════════════
 #  Multipart 解析器
 # ═══════════════════════════════════════════════════════════════
@@ -360,6 +363,20 @@ class LocalModelEngine(TTSEngine):
 
         if self.api_format == "gpt-sovits":
             # GPT-SoVITS 专用格式：POST / {"text", "text_language", "speed"}
+            # 如果用户通过 UI 上传了参考音频，先用 /change_refer 设置
+            if clone_refer_info.get("path") and os.path.exists(clone_refer_info["path"]):
+                try:
+                    refer_payload = json.dumps({
+                        "refer_wav_path": clone_refer_info["path"],
+                        "prompt_text": clone_refer_info.get("text", "请使用此音频作为参考。"),
+                        "prompt_language": "zh",
+                    }).encode('utf-8')
+                    refer_req = urllib.request.Request(f"{base}/change_refer", data=refer_payload, headers={'Content-Type': 'application/json'})
+                    with opener.open(refer_req, timeout=10) as resp:
+                        resp.read()
+                    log(f"GPT-SoVITS 已设置参考音频: {clone_refer_info['path']}")
+                except Exception as e:
+                    log(f"GPT-SoVITS 设置参考音频失败: {e}")
             try:
                 speed = 1.0 + float(rate) / 100
             except (ValueError, TypeError):
@@ -1383,9 +1400,17 @@ async function transcribeUploadedAudio(){
     else showStatus('transcribeResult','error','❌ '+(d.error||''));
 }
 
-function useAsCloneRef(){
+async function useAsCloneRef(){
     if(!uploadedAudioPath){showStatus('transcribeResult','error','❌ 请先上传音频');return;}
-    showStatus('transcribeResult','info','🎤 已选为克隆参考音频。请切换到支持声音克隆的引擎（如 GPT-SoVITS），启动其 API 后使用。\n参考音频路径: '+uploadedAudioPath);
+    showStatus('transcribeResult','info','🔄 正在设置参考音频...');
+    try{
+        const d=await api('/api/set-clone-ref',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:uploadedAudioPath,text:'请使用此音频作为参考。'})});
+        if(d.success){
+            showStatus('transcribeResult','success','✅ 参考音频已设置！请切换到 GPT-SoVITS 引擎，输入文字生成语音即可。\n参考音频: '+uploadedAudioPath);
+        }else{
+            showStatus('transcribeResult','error','❌ '+(d.error||'设置失败'));
+        }
+    }catch(e){showStatus('transcribeResult','error','❌ '+e.message);}
 }
 
 async function onVideoUpload(input){
@@ -1443,9 +1468,17 @@ async function transcribeVideoAudio(){
     else showStatus('videoTranscribeResult','error','❌ '+(d.error||''));
 }
 
-function useExtractedAsClone(){
+async function useExtractedAsClone(){
     if(!extractedAudioPath){showStatus('videoTranscribeResult','error','❌ 请先提取音频');return;}
-    showStatus('videoTranscribeResult','info','🎤 已选为克隆参考音频。请切换到支持声音克隆的引擎（如 GPT-SoVITS），启动其 API 后使用。\n参考音频路径: '+extractedAudioPath);
+    showStatus('videoTranscribeResult','info','🔄 正在设置参考音频...');
+    try{
+        const d=await api('/api/set-clone-ref',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:extractedAudioPath,text:'请使用此音频作为参考。'})});
+        if(d.success){
+            showStatus('videoTranscribeResult','success','✅ 参考音频已设置！请切换到 GPT-SoVITS 引擎，输入文字生成语音即可。');
+        }else{
+            showStatus('videoTranscribeResult','error','❌ '+(d.error||'设置失败'));
+        }
+    }catch(e){showStatus('videoTranscribeResult','error','❌ '+e.message);}
 }
 
 async function refreshEngines(){
@@ -1644,6 +1677,17 @@ class TTSHandler(BaseHTTPRequestHandler):
                 log(f"生成失败: {e}")
                 self.send_json({"error": str(e)})
 
+        elif path == '/api/set-clone-ref':
+            """设置克隆参考音频（用户通过 UI 上传）"""
+            global clone_refer_info
+            data = self.read_json()
+            ref_path = data.get('path', '')
+            ref_text = data.get('text', '请使用此音频作为参考。')
+            if not ref_path or not Path(ref_path).exists():
+                self.send_json({"success": False, "error": "参考音频文件不存在"}); return
+            clone_refer_info = {"path": ref_path, "text": ref_text}
+            log(f"用户设置克隆参考音频: {ref_path}")
+            self.send_json({"success": True, "message": f"已设置参考音频: {Path(ref_path).name}"})
         elif path == '/api/save-audio':
             """将临时文件保存到输出目录"""
             data = self.read_json()
