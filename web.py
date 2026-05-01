@@ -382,17 +382,23 @@ class LocalModelEngine(TTSEngine):
                 }
                 if clone_refer_info.get("path") and os.path.exists(clone_refer_info["path"]):
                     refer_path = clone_refer_info["path"]
+                    # GPT-SoVITS 需要 WAV 格式，自动转换任何音频格式
                     if not refer_path.lower().endswith('.wav'):
-                        wav_path = str(Path(refer_path).with_suffix('.wav'))
+                        import tempfile
+                        wav_path = os.path.join(tempfile.gettempdir(), f"clone_refer_{os.getpid()}.wav")
                         try:
                             import subprocess as sp
-                            sp.run(['ffmpeg', '-y', '-i', refer_path, '-ar', '32000', '-ac', '1', wav_path],
-                                   capture_output=True, timeout=30)
-                            if os.path.exists(wav_path):
+                            result = sp.run(
+                                ['ffmpeg', '-y', '-i', refer_path, '-ar', '32000', '-ac', '1', wav_path],
+                                capture_output=True, text=True, timeout=30
+                            )
+                            if result.returncode == 0 and os.path.exists(wav_path):
                                 refer_path = wav_path
-                                log(f"参考音频已转换为 WAV: {wav_path}")
+                                log(f"✅ 参考音频已转换: {Path(clone_refer_info['path']).suffix} → WAV (32kHz/mono)")
+                            else:
+                                log(f"❌ 音频转换失败: {result.stderr[:200]}")
                         except Exception as e:
-                            log(f"音频转换失败: {e}")
+                            log(f"❌ 音频转换异常: {e}")
                     payload_dict["refer_wav_path"] = refer_path
                     payload_dict["prompt_text"] = clone_refer_info.get("text", "请使用此音频作为参考。")
                     payload_dict["prompt_language"] = "zh"
