@@ -23,10 +23,25 @@ import signal
 import tempfile
 import threading
 import urllib.parse
+import urllib.request
+import urllib.error
 from pathlib import Path
 from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
+
+# ═══════════════════════════════════════════════════════════════
+#  全局代理绕过 — 确保所有 urllib 请求到 localhost 不走系统代理
+#  （解决 Clash/VPN 等代理把 127.0.0.1 请求转发到外网的问题）
+# ═══════════════════════════════════════════════════════════════
+
+# 清除所有代理环境变量（防止子进程和 urllib 继承）
+for _proxy_key in ['http_proxy', 'https_proxy', 'HTTP_PROXY', 'HTTPS_PROXY', 'all_proxy', 'ALL_PROXY', 'no_proxy', 'NO_PROXY']:
+    os.environ.pop(_proxy_key, None)
+
+# 安装全局无代理 opener（覆盖 urllib.request.urlopen 的默认行为）
+_no_proxy_opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+urllib.request.install_opener(_no_proxy_opener)
 
 # ═══════════════════════════════════════════════════════════════
 #  全局配置
@@ -143,13 +158,13 @@ def parse_multipart(body, boundary):
 KNOWN_MODELS = {
     "GPT-SoVITS": {"markers": ["GPT_SoVITS", "api.py", "webui.py"], "name": "GPT-SoVITS", "description": "少样本语音克隆，3秒参考音频复刻声音", "type": "local", "api_port": 9880, "api_endpoint": "/", "voice_endpoint": "/", "start_command": "conda activate gpt-sovits && python api.py", "api_format": "gpt-sovits"},
     "gpt-sovits": {"markers": ["GPT_SoVITS", "api.py", "webui.py"], "name": "GPT-SoVITS", "description": "少样本语音克隆，3秒参考音频复刻声音", "type": "local", "api_port": 9880, "api_endpoint": "/", "voice_endpoint": "/", "start_command": "conda activate gpt-sovits && python api.py", "api_format": "gpt-sovits"},
-    "Qwen3-TTS": {"markers": ["qwen_tts", "pyproject.toml"], "name": "Qwen3-TTS", "description": "通义千问语音合成", "type": "local", "api_port": 5000, "start_command": "conda activate qwen3-tts && python -m qwen_tts.webui"},
-    "qwen3-tts": {"markers": ["qwen_tts", "pyproject.toml"], "name": "Qwen3-TTS", "description": "通义千问语音合成", "type": "local", "api_port": 5000, "start_command": "conda activate qwen3-tts && python -m qwen_tts.webui"},
-    "IndexTTS2": {"markers": ["index_tts", "webui.py"], "name": "IndexTTS2", "description": "高质量语音合成与声音克隆", "type": "local", "api_port": 7865, "start_command": "uv run python webui.py"},
-    "indextts2": {"markers": ["index_tts", "webui.py"], "name": "IndexTTS2", "description": "高质量语音合成与声音克隆", "type": "local", "api_port": 7865, "start_command": "uv run python webui.py"},
-    "CosyVoice": {"markers": ["cosyvoice", "webui.py"], "name": "CosyVoice", "description": "阿里通义语音，18种方言", "type": "local", "api_port": 50000, "start_command": "python webui.py"},
-    "ChatTTS": {"markers": ["ChatTTS", "webui.py"], "name": "ChatTTS", "description": "口语化语音合成", "type": "local", "api_port": 9966, "start_command": "python webui.py"},
-    "Fish-Speech": {"markers": ["fish_speech", "fishaudio"], "name": "Fish-Speech", "description": "50种语言，情感标签", "type": "local", "api_port": 8080, "start_command": "python -m fish_speech.webui"},
+    "Qwen3-TTS": {"markers": ["qwen_tts", "pyproject.toml"], "name": "Qwen3-TTS", "description": "通义千问语音合成", "type": "local", "api_port": 5000, "api_endpoint": "/api/tts", "voice_endpoint": "/api/voices", "start_command": "conda activate qwen3-tts && python -m qwen_tts.webui", "api_format": "standard"},
+    "qwen3-tts": {"markers": ["qwen_tts", "pyproject.toml"], "name": "Qwen3-TTS", "description": "通义千问语音合成", "type": "local", "api_port": 5000, "api_endpoint": "/api/tts", "voice_endpoint": "/api/voices", "start_command": "conda activate qwen3-tts && python -m qwen_tts.webui", "api_format": "standard"},
+    "IndexTTS2": {"markers": ["index_tts", "webui.py"], "name": "IndexTTS2", "description": "高质量语音合成与声音克隆", "type": "local", "api_port": 7865, "api_endpoint": "/api/tts", "voice_endpoint": "/api/voices", "start_command": "uv run python webui.py", "api_format": "standard"},
+    "indextts2": {"markers": ["index_tts", "webui.py"], "name": "IndexTTS2", "description": "高质量语音合成与声音克隆", "type": "local", "api_port": 7865, "api_endpoint": "/api/tts", "voice_endpoint": "/api/voices", "start_command": "uv run python webui.py", "api_format": "standard"},
+    "CosyVoice": {"markers": ["cosyvoice", "webui.py"], "name": "CosyVoice", "description": "阿里通义语音，18种方言", "type": "local", "api_port": 50000, "api_endpoint": "/api/tts", "voice_endpoint": "/api/voices", "start_command": "python webui.py", "api_format": "standard"},
+    "ChatTTS": {"markers": ["ChatTTS", "webui.py"], "name": "ChatTTS", "description": "口语化语音合成", "type": "local", "api_port": 9966, "api_endpoint": "/api/tts", "voice_endpoint": "/api/voices", "start_command": "python webui.py", "api_format": "standard"},
+    "Fish-Speech": {"markers": ["fish_speech", "fishaudio"], "name": "Fish-Speech", "description": "50种语言，情感标签", "type": "local", "api_port": 8080, "api_endpoint": "/api/tts", "voice_endpoint": "/api/voices", "start_command": "python -m fish_speech.webui", "api_format": "standard"},
 }
 
 def scan_local_models():
@@ -327,11 +342,8 @@ class LocalModelEngine(TTSEngine):
         if not base:
             return False
         try:
-            import urllib.request
-            import urllib.error
-            # GPT-SoVITS 的 / 端点只接受 POST，用 HEAD 或 OPTIONS 检测端口
+            # GPT-SoVITS 的 / 端点只接受 POST，用 socket 检测端口
             if self.api_format == "gpt-sovits":
-                # 只检测端口是否开放，不关心 HTTP 方法
                 import socket
                 port = self.api_port
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -346,7 +358,9 @@ class LocalModelEngine(TTSEngine):
         except urllib.error.HTTPError:
             # 端口有响应但返回 HTTP 错误（如 405），说明服务在运行
             return True
-        except:
+        except urllib.error.URLError:
+            return False
+        except Exception:
             return False
 
     def is_available(self):
@@ -356,86 +370,105 @@ class LocalModelEngine(TTSEngine):
         base = self._get_base_url()
         if not base or not self._is_api_running():
             raise RuntimeError(f"{self.name} API 未运行！\n请先在 UI 中切换到该引擎，系统会自动启动。")
-        import urllib.request
-        import urllib.error
-        import os
-        # 绕过代理访问本地服务（防止 VPN/代理把 localhost 请求转发到外网）
-        old_env = {}
-        for k in ['http_proxy', 'https_proxy', 'HTTP_PROXY', 'HTTPS_PROXY', 'all_proxy', 'ALL_PROXY']:
-            if k in os.environ:
-                old_env[k] = os.environ.pop(k)
-        try:
-            no_proxy_handler = urllib.request.ProxyHandler({})
-            opener = urllib.request.build_opener(no_proxy_handler)
+        # 注意：代理已在模块级别通过 install_opener 全局绕过，
+        # 无需在每次请求时临时清除环境变量
+        no_proxy_handler = urllib.request.ProxyHandler({})
+        opener = urllib.request.build_opener(no_proxy_handler)
 
-            if self.api_format == "gpt-sovits":
-                # GPT-SoVITS 专用格式
-                try:
-                    speed = 1.0 + float(rate) / 100
-                except (ValueError, TypeError):
-                    speed = 1.0
-                payload_dict = {
-                    "text": text.strip(),
-                    "text_language": "zh",
-                    "speed": speed,
-                    "spk": "",
-                }
-                if clone_refer_info.get("path") and os.path.exists(clone_refer_info["path"]):
-                    refer_path = clone_refer_info["path"]
-                    # GPT-SoVITS 需要 WAV 格式，自动转换任何音频格式
-                    if not refer_path.lower().endswith('.wav'):
-                        import tempfile
-                        wav_path = os.path.join(tempfile.gettempdir(), f"clone_refer_{os.getpid()}.wav")
-                        try:
-                            import subprocess as sp
-                            result = sp.run(
-                                ['ffmpeg', '-y', '-i', refer_path, '-ar', '32000', '-ac', '1', wav_path],
-                                capture_output=True, text=True, timeout=30
-                            )
-                            if result.returncode == 0 and os.path.exists(wav_path):
-                                refer_path = wav_path
-                                log(f"✅ 参考音频已转换: {Path(clone_refer_info['path']).suffix} → WAV (32kHz/mono)")
-                            else:
-                                log(f"❌ 音频转换失败: {result.stderr[:200]}")
-                        except Exception as e:
-                            log(f"❌ 音频转换异常: {e}")
-                    payload_dict["refer_wav_path"] = refer_path
-                    payload_dict["prompt_text"] = clone_refer_info.get("text", "请使用此音频作为参考。")
-                    payload_dict["prompt_language"] = "zh"
-                    log(f"GPT-SoVITS 使用参考音频: {refer_path}")
-                payload = json.dumps(payload_dict).encode('utf-8')
-                endpoint = self.api_endpoint or "/"
-                req = urllib.request.Request(f"{base}{endpoint}", data=payload, headers={'Content-Type': 'application/json'})
-                try:
-                    with opener.open(req, timeout=120) as resp:
-                        audio_data = resp.read()
-                except urllib.error.HTTPError as e:
-                    err_body = e.read().decode('utf-8', errors='replace')
-                    raise RuntimeError(f"{self.name} 生成失败 (HTTP {e.code}): {err_body}")
-                except Exception as e:
-                    raise RuntimeError(f"{self.name} 生成失败: {e}\n\n💡 提示：参考音频建议 3-10 秒 WAV 格式")
-                if not audio_data or len(audio_data) < 100:
-                    raise RuntimeError(f"{self.name} 生成了无效音频（{len(audio_data)} bytes）")
-                with open(output_path, 'wb') as f:
-                    f.write(audio_data)
-            else:
-                # 标准格式
-                try:
-                    speed = 1.0 + float(rate) / 100
-                except (ValueError, TypeError):
-                    speed = 1.0
-                payload = json.dumps({
-                    "text": text.strip(),
-                    "voice": voice,
-                    "speed": speed,
-                    "pitch": float(pitch) if str(pitch).lstrip('-').isdigit() else 0,
-                }).encode('utf-8')
-                req = urllib.request.Request(f"{base}{self.api_endpoint}", data=payload, headers={'Content-Type': 'application/json'})
+        if self.api_format == "gpt-sovits":
+            # GPT-SoVITS 专用格式
+            try:
+                speed = 1.0 + float(rate) / 100
+            except (ValueError, TypeError):
+                speed = 1.0
+            payload_dict = {
+                "text": text.strip(),
+                "text_language": "zh",
+                "speed": speed,
+                "spk": "",
+            }
+            if clone_refer_info.get("path") and os.path.exists(clone_refer_info["path"]):
+                refer_path = clone_refer_info["path"]
+                # GPT-SoVITS 需要 WAV 格式，自动转换任何音频格式
+                if not refer_path.lower().endswith('.wav'):
+                    wav_path = str(TEMP_DIR / f"clone_refer_{os.getpid()}.wav")
+                    try:
+                        result = subprocess.run(
+                            ['ffmpeg', '-y', '-i', refer_path, '-ar', '32000', '-ac', '1', wav_path],
+                            capture_output=True, text=True, timeout=30
+                        )
+                        if result.returncode == 0 and os.path.exists(wav_path):
+                            refer_path = wav_path
+                            log(f"参考音频已转换: {Path(clone_refer_info['path']).suffix} -> WAV (32kHz/mono)")
+                        else:
+                            log(f"音频转换失败: {result.stderr[:200]}")
+                    except Exception as e:
+                        log(f"音频转换异常: {e}")
+                payload_dict["refer_wav_path"] = refer_path
+                payload_dict["prompt_text"] = clone_refer_info.get("text", "请使用此音频作为参考。")
+                payload_dict["prompt_language"] = "zh"
+                log(f"GPT-SoVITS 使用参考音频: {refer_path}")
+            payload = json.dumps(payload_dict).encode('utf-8')
+            endpoint = self.api_endpoint or "/"
+            req = urllib.request.Request(f"{base}{endpoint}", data=payload, headers={'Content-Type': 'application/json'})
+            try:
+                with opener.open(req, timeout=120) as resp:
+                    audio_data = resp.read()
+            except urllib.error.HTTPError as e:
+                err_body = e.read().decode('utf-8', errors='replace')
+                raise RuntimeError(f"{self.name} 生成失败 (HTTP {e.code}): {err_body}")
+            except urllib.error.URLError as e:
+                raise RuntimeError(f"{self.name} 连接失败: {e.reason}\n\n请检查 {self.name} API 是否在运行（端口 {self.api_port}）")
+            except ConnectionError as e:
+                raise RuntimeError(f"{self.name} 连接失败: {e}\n\n请检查 {self.name} API 是否在运行（端口 {self.api_port}）")
+            except Exception as e:
+                err_msg = str(e)
+                # IncompleteRead 通常意味着代理干扰或服务端提前断开
+                if 'IncompleteRead' in err_msg or 'timed out' in err_msg.lower():
+                    raise RuntimeError(
+                        f"{self.name} 生成失败: {err_msg}\n\n"
+                        f"可能原因：\n"
+                        f"  1. 系统代理（如 Clash/VPN）拦截了 localhost 请求\n"
+                        f"  2. {self.name} API 服务不稳定\n"
+                        f"建议：在终端运行 curl --noproxy '*' http://127.0.0.1:{self.api_port}/ 测试连通性"
+                    )
+                raise RuntimeError(f"{self.name} 生成失败: {err_msg}\n\n提示：参考音频建议 3-10 秒 WAV 格式")
+            if not audio_data or len(audio_data) < 100:
+                raise RuntimeError(f"{self.name} 生成了无效音频（{len(audio_data)} bytes）")
+            with open(output_path, 'wb') as f:
+                f.write(audio_data)
+        else:
+            # 标准格式
+            try:
+                speed = 1.0 + float(rate) / 100
+            except (ValueError, TypeError):
+                speed = 1.0
+            payload = json.dumps({
+                "text": text.strip(),
+                "voice": voice,
+                "speed": speed,
+                "pitch": float(pitch) if str(pitch).lstrip('-').isdigit() else 0,
+            }).encode('utf-8')
+            req = urllib.request.Request(f"{base}{self.api_endpoint}", data=payload, headers={'Content-Type': 'application/json'})
+            try:
                 with opener.open(req, timeout=120) as resp:
                     with open(output_path, 'wb') as f:
                         f.write(resp.read())
-        finally:
-            os.environ.update(old_env)
+            except urllib.error.HTTPError as e:
+                err_body = e.read().decode('utf-8', errors='replace')
+                raise RuntimeError(f"{self.name} 生成失败 (HTTP {e.code}): {err_body}")
+            except urllib.error.URLError as e:
+                raise RuntimeError(f"{self.name} 连接失败: {e.reason}\n\n请检查 {self.name} API 是否在运行（端口 {self.api_port}）")
+            except ConnectionError as e:
+                raise RuntimeError(f"{self.name} 连接失败: {e}\n\n请检查 {self.name} API 是否在运行（端口 {self.api_port}）")
+            except Exception as e:
+                err_msg = str(e)
+                if 'IncompleteRead' in err_msg or 'timed out' in err_msg.lower():
+                    raise RuntimeError(
+                        f"{self.name} 生成失败: {err_msg}\n\n"
+                        f"可能原因：系统代理拦截了 localhost 请求，或 API 服务不稳定"
+                    )
+                raise RuntimeError(f"{self.name} 生成失败: {err_msg}")
 
         if os.path.exists(output_path) and os.path.getsize(output_path) == 0:
             os.unlink(output_path)
@@ -449,13 +482,14 @@ class LocalModelEngine(TTSEngine):
         base = self._get_base_url()
         if base and self._is_api_running():
             try:
-                import urllib.request
+                no_proxy_handler = urllib.request.ProxyHandler({})
+                opener = urllib.request.build_opener(no_proxy_handler)
                 req = urllib.request.Request(f"{base}{self.voice_endpoint}", method='GET')
-                with urllib.request.urlopen(req, timeout=5) as resp:
+                with opener.open(req, timeout=5) as resp:
                     data = json.loads(resp.read().decode('utf-8'))
                     if isinstance(data, list):
                         return [(v, v) for v in data]
-            except:
+            except Exception:
                 pass
         return [("默认（需启动API）", "默认")]
 
@@ -514,12 +548,32 @@ class ModelProcessManager:
             Path.home() / "miniconda3" / "etc" / "profile.d" / "conda.sh",
             Path.home() / "anaconda3" / "etc" / "profile.d" / "conda.sh",
             Path.home() / "miniforge3" / "etc" / "profile.d" / "conda.sh",
+            Path.home() / "mambaforge" / "etc" / "profile.d" / "conda.sh",
             Path("/opt/homebrew/Caskroom/miniconda/base/etc/profile.d/conda.sh"),
             Path("/opt/homebrew/Caskroom/miniforge/base/etc/profile.d/conda.sh"),
+            Path("/opt/homebrew/Caskroom/mambaforge/base/etc/profile.d/conda.sh"),
+            Path("/usr/local/Caskroom/miniconda/base/etc/profile.d/conda.sh"),
+            Path("/usr/local/Caskroom/miniforge/base/etc/profile.d/conda.sh"),
+            # 尝试通过 which conda 找到
         ]:
             if p.exists():
                 conda_init = f"source {p} && "
                 break
+
+        # 如果没找到 conda.sh，尝试通过 shell 初始化 conda
+        if not conda_init and "conda activate" in start_cmd:
+            try:
+                result = subprocess.run(
+                    ["bash", "-l", "-c", "which conda 2>/dev/null && conda info --base 2>/dev/null"],
+                    capture_output=True, text=True, timeout=5
+                )
+                conda_base = result.stdout.strip().split('\n')[-1].strip()
+                if conda_base and Path(conda_base).exists():
+                    conda_sh = Path(conda_base) / "etc" / "profile.d" / "conda.sh"
+                    if conda_sh.exists():
+                        conda_init = f"source {conda_sh} && "
+            except Exception:
+                pass
 
         # 如果命令包含 conda activate，需要先 source conda.sh
         if "conda activate" in start_cmd and conda_init:
@@ -713,18 +767,31 @@ class ModelProcessManager:
         """自动杀掉占用指定端口的进程"""
         try:
             import subprocess as sp
-            result = sp.run(['lsof', '-ti', f':{port}'], capture_output=True, text=True, timeout=5)
-            pids = result.stdout.strip().split('\n')
-            pids = [p for p in pids if p.strip()]
+            # 优先使用 lsof，备选 fuser
+            pids = []
+            for cmd in [
+                ['lsof', '-ti', f':{port}'],
+                ['fuser', f'{port}/tcp'],
+            ]:
+                try:
+                    result = sp.run(cmd, capture_output=True, text=True, timeout=5)
+                    output = result.stdout.strip()
+                    if output:
+                        # lsof 输出每行一个 PID，fuser 输出空格分隔的 PID
+                        pids = output.replace('\n', ' ').split()
+                        pids = [p.strip() for p in pids if p.strip() and p.strip().isdigit()]
+                        break
+                except (FileNotFoundError, subprocess.TimeoutExpired):
+                    continue
             if pids:
                 for pid in pids:
                     try:
                         os.kill(int(pid), signal.SIGKILL)
                         log(f"自动清理端口 {port} 上的进程 PID={pid}")
-                    except:
+                    except Exception:
                         pass
                 time.sleep(1)  # 等待端口释放
-        except:
+        except Exception:
             pass
 
     def get_status(self):
@@ -829,10 +896,9 @@ def transcribe_audio(audio_path):
     # 检测网络是否可用
     def is_online():
         try:
-            import urllib.request
             urllib.request.urlopen("https://www.google.com", timeout=3)
             return True
-        except:
+        except Exception:
             return False
 
     online = is_online()
@@ -1592,10 +1658,9 @@ class TTSHandler(BaseHTTPRequestHandler):
         except: return {}
 
     def do_GET(self):
-        from urllib.parse import urlparse, parse_qs
-        parsed = urlparse(self.path)
+        parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
-        params = parse_qs(parsed.query)
+        params = urllib.parse.parse_qs(parsed.query)
 
         if path in ('/', '/index.html'):
             self.send_html(HTML_PAGE)
