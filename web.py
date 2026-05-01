@@ -325,9 +325,24 @@ class LocalModelEngine(TTSEngine):
             return False
         try:
             import urllib.request
-            req = urllib.request.Request(base, method='GET')
-            with urllib.request.urlopen(req, timeout=3) as resp:
-                return resp.status < 400
+            import urllib.error
+            # GPT-SoVITS 的 / 端点只接受 POST，用 HEAD 或 OPTIONS 检测端口
+            if self.api_format == "gpt-sovits":
+                # 只检测端口是否开放，不关心 HTTP 方法
+                import socket
+                port = self.api_port
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(2)
+                result = sock.connect_ex(('127.0.0.1', port))
+                sock.close()
+                return result == 0
+            else:
+                req = urllib.request.Request(base, method='GET')
+                with urllib.request.urlopen(req, timeout=3) as resp:
+                    return resp.status < 400
+        except urllib.error.HTTPError:
+            # 端口有响应但返回 HTTP 错误（如 405），说明服务在运行
+            return True
         except:
             return False
 
@@ -386,6 +401,9 @@ class LocalModelEngine(TTSEngine):
         return str(output_path)
 
     def get_voices(self):
+        if self.api_format == "gpt-sovits":
+            # GPT-SoVITS 没有声音列表 API，用参考音频作为"声音"
+            return [("默认（使用参考音频）", "默认")]
         base = self._get_base_url()
         if base and self._is_api_running():
             try:
