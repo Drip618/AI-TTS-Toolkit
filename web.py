@@ -394,6 +394,8 @@ class LocalModelEngine(TTSEngine):
             except urllib.error.HTTPError as e:
                 err_body = e.read().decode('utf-8', errors='replace')
                 raise RuntimeError(f"{self.name} 生成失败 (HTTP {e.code}): {err_body}")
+            except Exception as e:
+                raise RuntimeError(f"{self.name} 生成失败: {e}\n\n💡 提示：参考音频建议 3-10 秒，过长可能导致失败")
             if not audio_data or len(audio_data) < 100:
                 raise RuntimeError(f"{self.name} 生成了无效音频（{len(audio_data)} bytes）")
             with open(output_path, 'wb') as f:
